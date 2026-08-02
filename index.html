@@ -1796,22 +1796,39 @@ function ensureWhisper() {
   waWorker.postMessage({ type:'load', data:{ model: whisperModel, device: navigator.gpu ? 'webgpu' : 'wasm' } });
 }
 
-/* Überlappung entfernen: das neue Fenster beginnt oft mit dem Ende des alten. */
+/* Überlappung entfernen. Knifflig: Whisper schreibt denselben Ton in zwei Fenstern
+   leicht unterschiedlich („Outfits“ vs. „Outfans“), exaktes Vergleichen greift daher nicht.
+   Deshalb wortweise und unscharf vergleichen. */
+function normWords(s) {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+}
+function wordsAlike(a, b) {
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4)) return true;
+  return Math.abs(a.length - b.length) <= 1 && a[0] === b[0] && a.slice(-2) === b.slice(-2);
+}
+function trimOverlap(tail, txt) {
+  const A = normWords(tail), B = normWords(txt);
+  if (!A.length || !B.length) return txt;
+  const max = Math.min(A.length, B.length, 24);
+  for (let k = max; k >= 3; k--) {
+    const a = A.slice(-k), b = B.slice(0, k);
+    let hits = 0;
+    for (let i = 0; i < k; i++) if (wordsAlike(a[i], b[i])) hits++;
+    if (hits / k >= 0.65) return txt.trim().split(/\s+/).slice(k).join(' ').trim();
+  }
+  return txt;
+}
+
 function appendWhisperText(raw) {
   let txt = (raw || '').replace(/\s+/g, ' ').trim();
   if (!txt || /^[\s.,!?-]*$/.test(txt)) return;
-  if (lastTail) {
-    const words = txt.split(' ');
-    for (let n = Math.min(12, words.length); n >= 3; n--) {
-      const head = words.slice(0, n).join(' ').toLowerCase();
-      if (lastTail.toLowerCase().endsWith(head)) { txt = words.slice(n).join(' ').trim(); break; }
-    }
-  }
-  if (!txt) return;
+  if (lastTail) txt = trimOverlap(lastTail, txt);
+  if (!txt || normWords(txt).length < 2) return;
   const d = new Date();
   transcript.push({ t: String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'), s: txt });
   if (transcript.length > 800) transcript.splice(0, transcript.length - 800);
-  lastTail = txt.split(' ').slice(-12).join(' ');
+  lastTail = txt.split(' ').slice(-24).join(' ');
   interimText = '';
   trLastResultAt = Date.now(); trHintShown = false;
   renderTranscript();
