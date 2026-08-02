@@ -436,19 +436,78 @@
   .tr-placeholder strong { color:var(--text-dim); }
   .tr-note { background:#fffbeb; border:1px solid #fde68a; color:#854d0e; border-radius:9px; padding:11px 14px; font-size:12px; line-height:1.6; margin-top:16px; text-align:left; }
 
+  /* ============ MOBIL ============ */
+  .mobile-menu { display:none; }
+  .only-mobile { display:none; }
+  .scrim { display:none; position:fixed; inset:0; background:rgba(20,16,32,.5); z-index:140; }
+
   @media (max-width:860px) {
     .app { grid-template-columns:1fr; }
-    .sidebar { position:fixed; inset:0 auto 0 0; width:290px; z-index:150; box-shadow:6px 0 26px rgba(0,0,0,.3); transform:translateX(-100%); transition:transform .25s; }
+    .sidebar {
+      position:fixed; inset:0 auto 0 0; width:min(86vw,310px); z-index:150;
+      box-shadow:6px 0 26px rgba(0,0,0,.35); transform:translateX(-100%); transition:transform .25s;
+    }
     .app.mobile-open .sidebar { transform:translateX(0); display:flex; }
     .app.collapsed .sidebar { display:flex; }
+    .app.mobile-open ~ #scrim, .scrim.show { display:block; }
+
+    .only-mobile { display:inline; }
+    .only-desktop { display:none; }
+
+    /* Werkzeugleiste: zwei Zeilen statt einer überfüllten */
+    .toolbar { flex-wrap:wrap; gap:8px; padding:8px 10px; }
+    .toolbar-left { width:100%; gap:9px; }
     .logo-text { display:none; }
-    .toolbar { padding:9px 12px; }
+    .mobile-menu {
+      display:flex; align-items:center; justify-content:center; flex-shrink:0;
+      width:36px; height:36px; border-radius:9px; border:1px solid var(--border);
+      background:var(--bg); color:var(--text-dim); cursor:pointer; padding:0;
+    }
+    .mobile-menu svg { width:18px; height:18px; }
+    .mobile-menu:active { background:var(--bg-active); }
+    .toolbar-actions { margin-left:auto; gap:6px; }
+    .toolbar-actions .btn { padding:7px 10px; font-size:12px; }
+
+    .tabs { order:3; width:100%; }
+    .tab { flex:1; padding:9px 4px; font-size:12.5px; }
+
+    /* Radio: Kopfzeile umbrechen lassen */
+    .np-bar { padding:11px 12px; gap:10px; }
+    .np-art { width:42px; height:42px; }
+    .np-title { font-size:14.5px; }
+    .np-controls { width:100%; justify-content:space-between; }
+    .vol-wrap { flex:1; }
+    .vol { flex:1; width:auto; }
+
+    .tr-head { padding:10px 12px; gap:8px; }
+    .tr-ctrls { width:100%; flex-wrap:wrap; gap:6px; }
+    .tr-select { flex:1; min-width:132px; }
+    #trBtn { width:100%; justify-content:center; padding:12px; font-size:14px; }
+    #trDocActions { width:100%; }
+    #trDocActions .btn { flex:1; justify-content:center; }
+    .tr-body { padding:14px 14px 26px; }
+    .tr-text { font-size:15.5px; }
+    .tr-cta { width:100%; justify-content:center; font-size:15px; padding:15px 18px; }
+
+    .video-info-bar { padding:8px 12px; gap:7px; }
+    .vib-title { min-width:100%; white-space:normal; }
     .stats-scroll { padding:16px 14px 50px; }
+    .kpi-grid { grid-template-columns:repeat(auto-fit,minmax(116px,1fr)); gap:9px; }
+    .kpi-val { font-size:21px; }
+    .modal { padding:19px; border-radius:13px; }
+    .toast { bottom:14px; font-size:12.5px; }
+  }
+
+  @media (max-width:420px) {
+    .toolbar-actions .btn { padding:7px 8px; font-size:11.5px; }
+    .tab { font-size:11.5px; padding:9px 2px; }
+    .bar-row { grid-template-columns:1fr 56px; }
   }
 </style>
 </head>
 <body>
 
+<div class="scrim" id="scrim" onclick="toggleSidebar()"></div>
 <div class="app" id="app">
   <!-- ========== SIDEBAR ========== -->
   <aside class="sidebar" id="sidebar">
@@ -510,6 +569,11 @@
   <main class="main">
     <div class="toolbar">
       <div class="toolbar-left">
+        <button class="mobile-menu" onclick="toggleSidebar()" aria-label="Seitenleiste öffnen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
         <div class="logo" onclick="toggleSidebar()">
           <div class="logo-icon"><svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21" fill="white"/></svg></div>
           <div class="logo-text">Deutsch<span>Tube</span></div>
@@ -544,7 +608,10 @@
         <div class="player-placeholder" id="playerPlaceholder">
           <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
           <div class="pp-title">Wähle ein Video</div>
-          <div class="pp-sub">Klicke links auf ein Video — oder füge mit <span class="kbd">N</span> ein neues hinzu. Mit <span class="kbd">J</span> / <span class="kbd">K</span> springst du zum nächsten bzw. vorherigen Video.</div>
+          <div class="pp-sub">
+            <span class="only-mobile">Tippe oben links auf ☰ und wähle ein Video — oder lege mit <b>+ Video</b> ein neues an.</span>
+            <span class="only-desktop">Klicke links auf ein Video — oder füge mit <span class="kbd">N</span> ein neues hinzu. Mit <span class="kbd">J</span> / <span class="kbd">K</span> springst du zum nächsten bzw. vorherigen Video.</span>
+          </div>
         </div>
         <div class="autoplay-overlay" id="autoplayOverlay" style="display:none;">
           <div class="autoplay-box">
@@ -1131,8 +1198,15 @@ function toggleHard(id) {
 }
 function toggleSidebar() {
   const app = document.getElementById('app');
-  if (window.innerWidth <= 860) app.classList.toggle('mobile-open');
-  else app.classList.toggle('collapsed');
+  if (window.innerWidth <= 860) {
+    const open = app.classList.toggle('mobile-open');
+    document.getElementById('scrim').classList.toggle('show', open);
+  } else app.classList.toggle('collapsed');
+}
+function closeMobileSidebar() {
+  if (window.innerWidth > 860) return;
+  document.getElementById('app').classList.remove('mobile-open');
+  document.getElementById('scrim').classList.remove('show');
 }
 function onSearch() { searchQ = document.getElementById('searchInput').value.trim().toLowerCase(); renderSidebar(); }
 function clearSearch() { document.getElementById('searchInput').value=''; searchQ=''; renderSidebar(); }
@@ -1219,7 +1293,7 @@ function playVideo(id) {
   activeVideoId = id;
   if (v.status === 'to-watch') v.status = 'in-progress';
   setView('player');
-  if (window.innerWidth <= 860) document.getElementById('app').classList.remove('mobile-open');
+  closeMobileSidebar();
 
   const wrapper = document.getElementById('playerWrapper');
   const ph = document.getElementById('playerPlaceholder');
@@ -1378,6 +1452,7 @@ function playStation(id) {
   currentStation = s;
   radioSessionSec = 0;          // „eingeschaltet“ zählt erst, wenn wirklich Ton fließt
   ui.lastStation = s.id;
+  closeMobileSidebar();
 
   if (s.type === 'hls') {
     if (window.Hls && Hls.isSupported()) {
