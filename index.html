@@ -483,6 +483,7 @@
     .tr-ctrls { width:100%; flex-wrap:wrap; gap:6px; }
     .tr-select { flex:1; min-width:132px; }
     #trBtn { width:100%; justify-content:center; padding:12px; font-size:14px; }
+    #trBtn.cta-visible { display:none; }   /* großer Knopf in der Mitte reicht */
     #trDocActions { width:100%; }
     #trDocActions .btn { flex:1; justify-content:center; }
     .tr-body { padding:14px 14px 26px; }
@@ -1143,7 +1144,7 @@ function renderSidebar() {
         ${all.length ? `<div class="topic-progress"><div style="width:${pct}%;background:${t.color}"></div></div>` : ''}
         <div class="topic-videos">
           ${list.length ? list.map(renderVideoItem).join('')
-            : `<div class="empty-hint">Keine Videos — Rechtsklick aufs Thema → „Video hinzufügen“</div>`}
+            : `<div class="empty-hint">Noch keine Videos — oben auf <b style="color:#c4b5fd">+ Video</b> tippen und dieses Thema wählen.</div>`}
         </div>
       </div>`;
   });
@@ -1643,6 +1644,8 @@ function renderTranscript() {
   const box = document.getElementById('trBody');
   const acts = document.getElementById('trDocActions');
   if (acts) acts.style.display = transcript.length ? 'flex' : 'none';
+  const tb = document.getElementById('trBtn');
+  if (tb) tb.classList.toggle('cta-visible', !trWantsRun && !transcript.length);
   if (!transcript.length && !interimText) { box.innerHTML = transcriptPlaceholder(); return; }
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
   box.innerHTML = transcript.map(l =>
@@ -1661,6 +1664,8 @@ function setTrStatus(txt, mode) {   // mode: 'on' | 'wait' | 'off'
   const b = document.getElementById('trBtn');
   b.textContent = trWantsRun ? '⏹ Transkription stoppen' : '🎙 Live-Transkription starten';
   b.classList.toggle('running', trWantsRun);
+  // Auf dem Handy übernimmt der große Knopf in der Mitte — den oben dann ausblenden
+  b.classList.toggle('cta-visible', !trWantsRun && !transcript.length);
   // Kopieren/Sichern/Leeren nur zeigen, wenn es auch etwas zu kopieren gibt
   document.getElementById('trDocActions').style.display = transcript.length ? 'flex' : 'none';
   renderMicMeter();
