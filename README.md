@@ -18,16 +18,27 @@ Teil des Lern-Ökosystems zusammen mit
 - Autoplay zum nächsten Video, Loop-Modus fürs Shadowing
 - Deep-Link `?v=VIDEO_ID`
 
+**Radio**
+- Live-Sender als Audio-Stream (MP3/AAC) oder HLS (`.m3u8`), mit Deutschlandfunk,
+  DLF Kultur, DLF Nova und tagesschau24 als Startbelegung
+- Sender hinzufügen, bearbeiten, löschen; Lautstärke wird gemerkt
+- Radio pausiert automatisch, sobald ein Video startet — nie zwei Tonquellen gleichzeitig
+- Hörzeit pro Sender; sie fließt in dieselbe Heatmap und Serie wie die Videozeit
+- **Live-Mitschrift** über die Spracherkennung des Browsers (Chrome/Edge, `de-DE`):
+  läuft übers Mikrofon, der Sender muss also über Lautsprecher laufen.
+  Mitschrift lässt sich kopieren oder als `.txt` sichern.
+  Nur `https://`-Streams — unverschlüsselte werden vom Browser blockiert.
+
 **Gedächtnis**
-- Alles liegt in `localStorage` (Schlüssel `deutschtube_v2`) — überlebt Neuladen und Neustart
-- Automatische Migration aus der alten Einzeldatei-Version
+- Alles liegt in `localStorage` (Schlüssel `deutschtube_v2`, Schema v3) — überlebt Neuladen und Neustart
+- Automatische Migration aus der alten Einzeldatei-Version und aus `radiode_stations` der RadioDE-App
 - JSON-Export / -Import zum Sichern und Umziehen auf andere Geräte
   (Import wahlweise *zusammenführen* oder *ersetzen*; vorher wird automatisch eine
   Rücksetz-Kopie unter `deutschtube_v2_autobackup` angelegt)
 
 **Statistik**
 - Wiedergaben und Wiedergabezeit pro Video (gezählt ab 5 s echter Wiedergabe)
-- Zeit pro Thema
+- Zeit pro Thema und Hörzeit pro Radiosender
 - Schwachstellen-Rangliste: 50 % Wiederholungsrate + 30 % ⚡-Anteil + 20 % Zeitintensität
 - Aktivitäts-Heatmap der letzten 26 Wochen, Streak und längste Serie
 - „Zu lange nicht angerührt“ — Themen für die nächste Wiederholung
@@ -36,10 +47,12 @@ Teil des Lern-Ökosystems zusammen mit
 
 | Taste | Aktion |
 |---|---|
-| `N` | Video hinzufügen |
+| `N` | Video hinzufügen (im Radio-Tab: Sender) |
 | `T` | Thema anlegen |
 | `/` | Suche |
 | `S` | Statistik ⇄ Player |
+| `R` | Radio ⇄ Player |
+| `Leertaste` | Radio abspielen / pausieren (im Radio-Tab) |
 | `J` / `K` | nächstes / vorheriges Video |
 | `B` | Merkliste |
 | `H` | als schwer markieren |
