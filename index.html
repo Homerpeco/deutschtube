@@ -1817,14 +1817,38 @@ function appendWhisperText(raw) {
   renderTranscript();
 }
 
-/* ---------- Ton direkt vom Player abgreifen ---------- */
+/* ---------- Ton direkt vom Player abgreifen ----------
+   WICHTIG: Chrome startet einen AudioContext nur während einer Nutzergeste.
+   Alles bis zum laufenden Context muss deshalb SYNCHRON im Klick passieren —
+   nach dem ersten await ist die Geste verbraucht und resume() löst nie mehr auf. */
+function openAudioContextSync() {
+  if (!capCtx) {
+    try { capCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (e) { console.error('AudioContext:', e); return false; }
+  }
+  capRate = capCtx.sampleRate;
+  if (capCtx.state === 'suspended') capCtx.resume().catch(()=>{});   // NICHT awaiten
+  return true;
+}
+
 async function startStreamCapture() {
   const audio = radioEl();
   if (!trHasStream()) { showToast('Starte zuerst einen Sender.'); return false; }
 
-  // Für den Zugriff auf die Samples muss der Stream CORS erlauben.
+  // Auf das Anlaufen des Contexts warten — aber mit Deckel, damit nichts hängen bleibt.
+  const t0 = Date.now();
+  while (capCtx.state !== 'running' && Date.now() - t0 < 3000) {
+    await new Promise(r => setTimeout(r, 60));
+    if (capCtx.state === 'suspended') capCtx.resume().catch(()=>{});
+  }
+  if (capCtx.state !== 'running') {
+    showToast('Der Browser hat die Tonverarbeitung blockiert — bitte noch einmal auf „Mitschrift starten“ klicken.');
+    return false;
+  }
+
+  // Ohne CORS liefert der Abgriff nur Stille. Sender daher einmal sauber neu laden.
   if (!audio.crossOrigin && currentStation.type !== 'hls') {
-    const st = currentStation, pos = audio.currentTime;
+    const st = currentStation;
     audio.crossOrigin = 'anonymous';
     const ok = await new Promise(res => {
       let done = false;
@@ -1844,10 +1868,9 @@ async function startStreamCapture() {
   }
 
   try {
-    if (!capCtx) capCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (capCtx.state === 'suspended') await capCtx.resume();
-    capRate = capCtx.sampleRate;
+    // Erst jetzt anzapfen: ab hier läuft der Ton NUR noch durch den Graphen.
     if (!capSource) capSource = capCtx.createMediaElementSource(audio);   // nur einmal pro Element möglich
+    capSource.connect(capCtx.destination);      // Ton bleibt hörbar
 
     if (!capNode) {
       const src = `class C extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(new Float32Array(c));return true;}}registerProcessor('cap',C);`;
@@ -1855,7 +1878,6 @@ async function startStreamCapture() {
       capNode = new AudioWorkletNode(capCtx, 'cap');
       capNode.port.onmessage = e => onCapturedAudio(e.data);
     }
-    capSource.connect(capCtx.destination);      // Ton bleibt hörbar
     capSource.connect(capNode);
     return true;
   } catch (e) {
@@ -1918,15 +1940,18 @@ async function startTranscription() {
   /* --- Weg 1: direkt aus dem Stream, lokal per Whisper --- */
   if (trMode === 'stream') {
     if (!trHasStream()) { showToast('Starte zuerst einen Sender.'); return; }
+
+    // SYNCHRON, solange die Nutzergeste des Klicks noch gilt:
+    if (!openAudioContextSync()) { showToast('Tonverarbeitung nicht verfügbar.'); return; }
+    ensureWhisper();                       // Download darf parallel schon laufen
+
     trWantsRun = true;
-    setTrStatus('Ton wird abgegriffen…', 'wait');
+    setTrStatus(waReady ? 'Ton wird abgegriffen…' : 'Modell lädt…', 'wait');
     renderTranscript();
     document.getElementById('micMeter').style.display = 'flex';
 
-    if (!(await startStreamCapture())) { trWantsRun = false; setTrStatus('Inaktiv', 'off'); renderTranscript(); return; }
+    if (!(await startStreamCapture())) { trWantsRun = false; stopStreamCapture(); setTrStatus('Inaktiv', 'off'); renderTranscript(); return; }
     if (!trWantsRun) { stopStreamCapture(); return; }
-
-    ensureWhisper();
     if (waReady) setTrStatus('Hört mit…', 'on');
     trLastResultAt = Date.now(); trHintShown = false;
     clearInterval(trWatchdog);
