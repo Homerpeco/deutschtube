@@ -1323,8 +1323,7 @@ function playStation(id) {
   audio.pause(); audio.removeAttribute('src'); audio.load();
 
   currentStation = s;
-  s.plays = (s.plays || 0) + 1;
-  s.lastPlayedAt = new Date().toISOString();
+  radioSessionSec = 0;          // „eingeschaltet“ zählt erst, wenn wirklich Ton fließt
   ui.lastStation = s.id;
 
   if (s.type === 'hls') {
@@ -1374,9 +1373,14 @@ function startRadioTicking() {
   radioTimer = setInterval(() => {
     const audio = radioEl();
     if (!currentStation || audio.paused || audio.readyState < 2) return;
+    radioSessionSec++;
+    if (radioSessionSec === 1) {   // erster Sekundentakt mit echtem Ton = eingeschaltet
+      currentStation.plays = (currentStation.plays || 0) + 1;
+      currentStation.lastPlayedAt = new Date().toISOString();
+      renderStations();
+    }
     currentStation.seconds = (currentStation.seconds || 0) + 1;
     daily[todayKey()] = (daily[todayKey()] || 0) + 1;
-    radioSessionSec++;
     if (radioSessionSec % 15 === 0) { saveData(); updateStats(); }
   }, 1000);
 }
