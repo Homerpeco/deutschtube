@@ -1,0 +1,1656 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeutschTube — Deine kuratierte Video-Bibliothek</title>
+<meta name="description" content="Handverlesene deutsche Lernvideos, nach Themen sortiert, mit Fortschritt und Schwachstellen-Analyse.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%236b3fa0'/><polygon points='38,28 74,50 38,72' fill='white'/></svg>">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+  :root {
+    --bg: #ffffff;
+    --bg-input: #f5f4f8;
+    --bg-active: #ede8fc;
+    --bg-soft: #faf9fc;
+    --accent: #6b3fa0;
+    --accent-glow: rgba(107,63,160,0.12);
+    --accent-light: #8b5cf6;
+    --green: #16a34a;
+    --blue: #2563eb;
+    --purple: #7c3aed;
+    --red: #dc2626;
+    --yellow: #ca8a04;
+    --orange: #ea580c;
+    --cyan: #0891b2;
+    --pink: #db2777;
+    --text: #1e1b2e;
+    --text-dim: #4a4560;
+    --text-muted: #8a8498;
+    --border: #ddd9e4;
+    --border-light: #ccc8d6;
+    --bg-sidebar: #3a3a3a;
+    --bg-card: #444444;
+    --bg-hover: #484848;
+    --sidebar-text: #e0e0e0;
+    --sidebar-text-dim: #a8a8a8;
+    --sidebar-text-muted: #787878;
+    --sidebar-border: #4a4a4a;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; }
+  body {
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:var(--bg); color:var(--text);
+    height:100vh; overflow:hidden; -webkit-font-smoothing:antialiased;
+  }
+
+  /* ============ LAYOUT ============ */
+  .app { display:grid; grid-template-columns:320px 1fr; height:100vh; overflow:hidden; }
+  .app.collapsed { grid-template-columns:0px 1fr; }
+
+  /* ============ SIDEBAR ============ */
+  .sidebar {
+    background:var(--bg-sidebar); border-right:1px solid var(--sidebar-border);
+    display:flex; flex-direction:column; overflow:hidden; position:relative; color:var(--sidebar-text);
+  }
+  .app.collapsed .sidebar { display:none; }
+
+  .sidebar-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px 12px; border-bottom:1px solid var(--sidebar-border); flex-shrink:0; gap:8px;
+  }
+  .sidebar-header-left { display:flex; align-items:center; gap:9px; min-width:0; }
+  .sidebar-label { font-size:14px; font-weight:700; color:var(--sidebar-text); white-space:nowrap; }
+  .sidebar-menu-icon { width:18px; height:18px; color:var(--sidebar-text-dim); cursor:pointer; transition:color .15s; flex-shrink:0; }
+  .sidebar-menu-icon:hover { color:var(--sidebar-text); }
+  .sidebar-header .btn { background:var(--bg-hover); border-color:var(--sidebar-border); color:var(--sidebar-text); }
+  .sidebar-header .btn:hover { border-color:var(--accent-light); color:#fff; }
+
+  /* search + filters */
+  .side-tools { padding:10px 14px; border-bottom:1px solid var(--sidebar-border); flex-shrink:0; }
+  .search-wrap { position:relative; }
+  .search-wrap svg { position:absolute; left:9px; top:50%; transform:translateY(-50%); width:14px; height:14px; color:var(--sidebar-text-muted); pointer-events:none; }
+  .search-input {
+    width:100%; background:#2f2f2f; border:1px solid var(--sidebar-border); color:var(--sidebar-text);
+    border-radius:7px; padding:7px 26px 7px 29px; font-size:12.5px; font-family:inherit; outline:none; transition:border-color .15s;
+  }
+  .search-input:focus { border-color:var(--accent-light); }
+  .search-input::placeholder { color:var(--sidebar-text-muted); }
+  .search-clear { position:absolute; right:6px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--sidebar-text-muted); cursor:pointer; font-size:15px; line-height:1; padding:2px 4px; display:none; }
+  .search-input:not(:placeholder-shown) ~ .search-clear { display:block; }
+
+  .filter-row { display:flex; gap:5px; margin-top:8px; flex-wrap:wrap; }
+  .fchip {
+    font-size:10.5px; font-weight:600; padding:4px 8px; border-radius:20px; cursor:pointer;
+    background:#2f2f2f; color:var(--sidebar-text-dim); border:1px solid var(--sidebar-border);
+    transition:all .15s; user-select:none; white-space:nowrap;
+  }
+  .fchip:hover { color:var(--sidebar-text); }
+  .fchip.on { background:var(--accent); border-color:var(--accent-light); color:#fff; }
+
+  .sidebar-scroll { flex:1; overflow-y:auto; padding-bottom:8px; }
+  .sidebar-scroll::-webkit-scrollbar { width:5px; }
+  .sidebar-scroll::-webkit-scrollbar-thumb { background:#5a5a5a; border-radius:3px; }
+
+  .topic-section { border-bottom:1px solid var(--sidebar-border); }
+  .topic-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:11px 14px; cursor:pointer; transition:background .15s; user-select:none; gap:6px;
+  }
+  .topic-header:hover { background:var(--bg-hover); }
+  .topic-header-left { display:flex; align-items:center; gap:9px; flex:1; min-width:0; }
+  .topic-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .topic-title { font-size:13px; font-weight:600; color:var(--sidebar-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .topic-count { font-size:10.5px; color:var(--sidebar-text-muted); font-weight:600; flex-shrink:0; font-variant-numeric:tabular-nums; }
+  .topic-chevron { width:16px; height:16px; color:var(--sidebar-text-muted); flex-shrink:0; transition:transform .25s ease; }
+  .topic-section.open .topic-chevron { transform:rotate(180deg); }
+  .topic-progress { height:2px; background:#2f2f2f; margin:0 14px 8px; border-radius:2px; overflow:hidden; }
+  .topic-progress > div { height:100%; transition:width .3s; }
+  .topic-videos { display:none; padding:0 0 4px; }
+  .topic-section.open .topic-videos { display:block; }
+
+  .video-item {
+    display:flex; align-items:flex-start; gap:9px;
+    padding:8px 12px 8px 24px; cursor:pointer; transition:background .15s; position:relative;
+  }
+  .video-item:hover { background:var(--bg-hover); }
+  .video-item.active { background:rgba(139,92,246,.22); box-shadow:inset 3px 0 0 var(--accent-light); }
+  .vi-status-icon { width:18px; height:18px; flex-shrink:0; margin-top:1px; display:flex; align-items:center; justify-content:center; }
+  .vi-info { flex:1; min-width:0; }
+  .vi-name { font-size:12.5px; font-weight:500; color:var(--sidebar-text); line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .video-item.active .vi-name { color:#c4b5fd; font-weight:600; }
+  .vi-sub { font-size:10.5px; color:var(--sidebar-text-muted); margin-top:3px; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .vi-sub b { color:var(--sidebar-text-dim); font-weight:600; }
+  .vi-actions { display:flex; align-items:center; gap:1px; flex-shrink:0; }
+  .vi-btn {
+    width:22px; height:22px; color:var(--sidebar-text-muted); cursor:pointer;
+    display:flex; align-items:center; justify-content:center; border-radius:5px; transition:all .15s; opacity:0; flex-shrink:0;
+  }
+  .video-item:hover .vi-btn { opacity:.85; }
+  .vi-btn:hover { background:#555; color:#fff; opacity:1 !important; }
+  .vi-btn.on { opacity:1 !important; color:var(--accent-light); }
+  .vi-btn.hard.on { color:#fb923c; }
+  .vi-btn.del:hover { color:#fca5a5; }
+
+  .empty-hint { padding:7px 14px 11px 24px; font-size:11.5px; color:var(--sidebar-text-muted); font-style:italic; }
+
+  .sidebar-foot { border-top:1px solid var(--sidebar-border); padding:9px 14px; flex-shrink:0; background:#333; }
+  .stat-pills { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:8px; }
+  .stat-pill { display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--sidebar-text-dim); background:#2f2f2f; padding:3px 8px; border-radius:20px; font-weight:600; }
+  .stat-dot { width:6px; height:6px; border-radius:50%; }
+  .app-links { display:flex; gap:5px; }
+  .app-link {
+    flex:1; text-align:center; font-size:10.5px; font-weight:600; padding:5px 4px; border-radius:6px;
+    background:#2f2f2f; color:var(--sidebar-text-dim); text-decoration:none; border:1px solid var(--sidebar-border); transition:all .15s;
+  }
+  .app-link:hover { background:var(--accent); color:#fff; border-color:var(--accent-light); }
+
+  /* ============ MAIN ============ */
+  .main { display:flex; flex-direction:column; overflow:hidden; min-width:0; background:var(--bg); }
+  .toolbar {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:10px 18px; border-bottom:1px solid var(--border); flex-shrink:0; background:var(--bg);
+  }
+  .toolbar-left { display:flex; align-items:center; gap:16px; min-width:0; }
+  .logo { display:flex; align-items:center; gap:9px; cursor:pointer; }
+  .logo-icon { width:28px; height:28px; border-radius:7px; background:var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .logo-icon svg { width:13px; height:13px; }
+  .logo-text { font-size:16px; font-weight:800; letter-spacing:-.4px; white-space:nowrap; }
+  .logo-text span { color:var(--accent); }
+
+  .tabs { display:flex; gap:2px; background:var(--bg-input); padding:3px; border-radius:9px; }
+  .tab {
+    font-size:12.5px; font-weight:600; padding:6px 14px; border-radius:7px; border:none; cursor:pointer;
+    background:transparent; color:var(--text-dim); font-family:inherit; transition:all .15s; white-space:nowrap;
+  }
+  .tab:hover { color:var(--text); }
+  .tab.on { background:#fff; color:var(--accent); box-shadow:0 1px 3px rgba(0,0,0,.09); }
+
+  .toolbar-actions { display:flex; align-items:center; gap:7px; flex-shrink:0; }
+  .btn {
+    display:inline-flex; align-items:center; gap:6px; font-family:inherit;
+    font-size:12.5px; font-weight:600; padding:7px 13px; border-radius:8px;
+    border:1px solid var(--border); background:var(--bg); color:var(--text-dim);
+    cursor:pointer; transition:all .15s; white-space:nowrap;
+  }
+  .btn:hover { border-color:var(--accent-light); color:var(--accent); }
+  .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn-primary:hover { background:#5a3489; border-color:#5a3489; color:#fff; }
+  .btn-ghost { border-color:transparent; background:transparent; }
+  .btn-sm { padding:5px 9px; font-size:11.5px; }
+  .btn svg { width:13px; height:13px; flex-shrink:0; }
+
+  .view { flex:1; overflow:hidden; display:none; flex-direction:column; min-height:0; }
+  .view.on { display:flex; }
+
+  /* --- player view --- */
+  .video-info-bar {
+    display:none; align-items:center; gap:10px; padding:9px 18px;
+    border-bottom:1px solid var(--border); background:var(--bg-soft); flex-shrink:0; flex-wrap:wrap;
+  }
+  .video-info-bar.show { display:flex; }
+  .vib-title { font-size:13.5px; font-weight:700; flex:1; min-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .meta-badge { font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; background:var(--bg-input); color:var(--text-dim); white-space:nowrap; }
+  .meta-status { cursor:pointer; user-select:none; }
+  .status-to-watch { background:#eeedf2; color:#6b6880; }
+  .status-in-progress { background:#dbeafe; color:#1d4ed8; }
+  .status-watched { background:#dcfce7; color:#15803d; }
+
+  .player-wrapper { flex:1; min-height:0; position:relative; background:#000; }
+  .youtube-frame, #ytFrame { width:100%; height:100%; border:0; }
+  .player-placeholder {
+    height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:12px; color:#6b6880; background:var(--bg-soft); padding:24px; text-align:center;
+  }
+  .player-placeholder svg { width:52px; height:52px; opacity:.28; fill:currentColor; }
+  .pp-title { font-size:16px; font-weight:700; color:var(--text-dim); }
+  .pp-sub { font-size:13px; color:var(--text-muted); max-width:380px; line-height:1.55; }
+
+  .autoplay-overlay { position:absolute; inset:0; background:rgba(0,0,0,.82); display:flex; align-items:center; justify-content:center; z-index:20; }
+  .autoplay-box { text-align:center; color:#fff; padding:24px; }
+  .autoplay-label { font-size:12.5px; color:#bbb; margin-bottom:8px; font-weight:600; }
+  .autoplay-counter { font-size:56px; font-weight:800; color:var(--accent-light); line-height:1; }
+  .autoplay-next-title { font-size:14px; margin:12px 0 18px; max-width:420px; }
+  .autoplay-btns { display:flex; gap:9px; justify-content:center; }
+  .autoplay-btn { font-family:inherit; font-size:12.5px; font-weight:600; padding:8px 15px; border-radius:8px; border:1px solid #555; background:#2a2a2a; color:#eee; cursor:pointer; }
+  .autoplay-now { background:var(--accent); border-color:var(--accent); }
+  .autoplay-btn:hover { filter:brightness(1.18); }
+
+  .notes-bar { border-top:1px solid var(--border); background:var(--bg-soft); flex-shrink:0; }
+  .notes-head {
+    display:flex; align-items:center; justify-content:space-between; padding:7px 18px; cursor:pointer; user-select:none;
+    font-size:11.5px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.4px;
+  }
+  .notes-head:hover { color:var(--accent); }
+  .notes-body { display:none; padding:0 18px 12px; }
+  .notes-bar.open .notes-body { display:block; }
+  .notes-ta {
+    width:100%; min-height:88px; resize:vertical; font-family:inherit; font-size:13px; line-height:1.6;
+    padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text); outline:none;
+  }
+  .notes-ta:focus { border-color:var(--accent-light); }
+
+  /* --- stats view --- */
+  .stats-scroll { flex:1; overflow-y:auto; padding:22px 26px 60px; }
+  .stats-scroll::-webkit-scrollbar { width:9px; }
+  .stats-scroll::-webkit-scrollbar-thumb { background:var(--border-light); border-radius:5px; }
+  .s-h2 { font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.7px; color:var(--text-muted); margin:30px 0 12px; }
+  .s-h2:first-child { margin-top:0; }
+  .s-sub { font-size:12px; color:var(--text-muted); margin:-7px 0 13px; line-height:1.55; }
+
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:11px; }
+  .kpi { background:var(--bg-soft); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+  .kpi-val { font-size:26px; font-weight:800; letter-spacing:-1px; line-height:1.1; }
+  .kpi-lbl { font-size:11px; font-weight:600; color:var(--text-muted); margin-top:3px; text-transform:uppercase; letter-spacing:.4px; }
+
+  .card { background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px 18px; }
+  .bar-row { display:grid; grid-template-columns:1fr 68px; gap:11px; align-items:center; padding:6px 0; }
+  .bar-label { font-size:12.5px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-track { height:7px; background:var(--bg-input); border-radius:5px; overflow:hidden; margin-top:5px; }
+  .bar-fill { height:100%; border-radius:5px; transition:width .4s; }
+  .bar-val { font-size:12px; font-weight:700; text-align:right; color:var(--text-dim); font-variant-numeric:tabular-nums; }
+
+  .weak-item { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--border); }
+  .weak-item:last-child { border-bottom:none; }
+  .weak-rank { width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; color:#fff; flex-shrink:0; }
+  .weak-body { flex:1; min-width:0; }
+  .weak-name { font-size:13.5px; font-weight:700; }
+  .weak-why { font-size:11.5px; color:var(--text-muted); margin-top:2px; }
+  .weak-score { font-size:11px; font-weight:800; padding:4px 10px; border-radius:20px; flex-shrink:0; }
+
+  .heat { display:flex; gap:3px; overflow-x:auto; padding-bottom:6px; }
+  .heat-col { display:flex; flex-direction:column; gap:3px; }
+  .heat-cell { width:12px; height:12px; border-radius:3px; background:var(--bg-input); }
+  .heat-legend { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-muted); margin-top:9px; }
+  .heat-legend .heat-cell { width:11px; height:11px; }
+
+  .tbl { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .tbl th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); font-weight:700; padding:0 10px 8px 0; border-bottom:1px solid var(--border); }
+  .tbl td { padding:9px 10px 9px 0; border-bottom:1px solid var(--bg-input); }
+  .tbl tr:last-child td { border-bottom:none; }
+  .tbl .num { text-align:right; font-variant-numeric:tabular-nums; font-weight:700; }
+  .tbl .clickable { cursor:pointer; }
+  .tbl .clickable:hover td { background:var(--bg-soft); }
+  .tdot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; vertical-align:middle; }
+
+  .empty-state { text-align:center; padding:44px 20px; color:var(--text-muted); font-size:13px; line-height:1.6; }
+
+  /* ============ MODALS ============ */
+  .modal-overlay {
+    position:fixed; inset:0; background:rgba(20,16,32,.55); backdrop-filter:blur(3px);
+    display:none; align-items:center; justify-content:center; z-index:200; padding:20px;
+  }
+  .modal-overlay.show { display:flex; }
+  .modal {
+    background:#fff; border-radius:15px; padding:24px; width:100%; max-width:480px;
+    box-shadow:0 20px 60px rgba(0,0,0,.28); max-height:88vh; overflow-y:auto;
+  }
+  .modal.wide { max-width:620px; }
+  .modal h2 { font-size:17px; font-weight:800; margin-bottom:4px; }
+  .modal .modal-desc { font-size:12.5px; color:var(--text-muted); margin-bottom:17px; line-height:1.55; }
+  .form-group { margin-bottom:14px; }
+  .form-label { display:block; font-size:11.5px; font-weight:700; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.4px; }
+  .form-input, .form-select, .form-ta {
+    width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:8px;
+    font-size:13.5px; font-family:inherit; background:var(--bg-input); color:var(--text); outline:none; transition:all .15s;
+  }
+  .form-ta { min-height:150px; resize:vertical; font-size:12.5px; line-height:1.6; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .form-input:focus, .form-select:focus, .form-ta:focus { border-color:var(--accent-light); background:#fff; box-shadow:0 0 0 3px var(--accent-glow); }
+  .form-hint { font-size:11.5px; color:var(--text-muted); margin-top:6px; line-height:1.5; }
+  .modal-actions { display:flex; gap:9px; justify-content:flex-end; margin-top:20px; flex-wrap:wrap; }
+  .color-options { display:flex; gap:8px; flex-wrap:wrap; }
+  .color-opt { width:28px; height:28px; border-radius:50%; cursor:pointer; border:3px solid transparent; transition:all .15s; }
+  .color-opt:hover { transform:scale(1.12); }
+  .color-opt.selected { border-color:var(--text); transform:scale(1.12); }
+  .mtabs { display:flex; gap:3px; background:var(--bg-input); padding:3px; border-radius:9px; margin-bottom:16px; }
+  .mtab { flex:1; font-size:12.5px; font-weight:600; padding:7px; border-radius:7px; border:none; background:transparent; color:var(--text-dim); cursor:pointer; font-family:inherit; }
+  .mtab.on { background:#fff; color:var(--accent); box-shadow:0 1px 3px rgba(0,0,0,.09); }
+  .mpane { display:none; } .mpane.on { display:block; }
+
+  .ctx-menu {
+    position:fixed; background:#fff; border:1px solid var(--border); border-radius:10px;
+    box-shadow:0 8px 28px rgba(0,0,0,.16); padding:5px; z-index:300; display:none; min-width:184px;
+  }
+  .ctx-menu.show { display:block; }
+  .ctx-item { display:flex; align-items:center; gap:9px; padding:8px 11px; font-size:12.5px; font-weight:500; border-radius:7px; cursor:pointer; color:var(--text-dim); }
+  .ctx-item:hover { background:var(--bg-active); color:var(--accent); }
+  .ctx-item svg { width:14px; height:14px; flex-shrink:0; }
+  .ctx-item.danger:hover { background:#fee2e2; color:var(--red); }
+  .ctx-sep { height:1px; background:var(--border); margin:4px 6px; }
+
+  .toast {
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(90px);
+    background:var(--text); color:#fff; padding:11px 20px; border-radius:10px; font-size:13px; font-weight:600;
+    z-index:400; transition:transform .3s cubic-bezier(.2,.9,.3,1.2); box-shadow:0 8px 26px rgba(0,0,0,.25); max-width:88vw; text-align:center;
+  }
+  .toast.show { transform:translateX(-50%) translateY(0); }
+
+  .kbd { font-family:ui-monospace,monospace; font-size:10.5px; background:var(--bg-input); border:1px solid var(--border); border-bottom-width:2px; border-radius:5px; padding:1px 5px; color:var(--text-dim); font-weight:700; }
+
+  @media (max-width:860px) {
+    .app { grid-template-columns:1fr; }
+    .sidebar { position:fixed; inset:0 auto 0 0; width:290px; z-index:150; box-shadow:6px 0 26px rgba(0,0,0,.3); transform:translateX(-100%); transition:transform .25s; }
+    .app.mobile-open .sidebar { transform:translateX(0); display:flex; }
+    .app.collapsed .sidebar { display:flex; }
+    .logo-text { display:none; }
+    .toolbar { padding:9px 12px; }
+    .stats-scroll { padding:16px 14px 50px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- ========== SIDEBAR ========== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-header-left">
+        <svg class="sidebar-menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="toggleSidebar()">
+          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+        <span class="sidebar-label">Themen</span>
+      </div>
+      <button class="btn btn-sm" onclick="openTopicModal()" title="Neues Thema (T)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Thema
+      </button>
+    </div>
+
+    <div class="side-tools">
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.7" y2="16.7"/></svg>
+        <input class="search-input" id="searchInput" placeholder="Videos durchsuchen…  ( / )" oninput="onSearch()">
+        <button class="search-clear" onclick="clearSearch()">×</button>
+      </div>
+      <div class="filter-row" id="filterRow">
+        <div class="fchip" data-f="to-watch" onclick="toggleFilter('to-watch')">Offen</div>
+        <div class="fchip" data-f="in-progress" onclick="toggleFilter('in-progress')">In Arbeit</div>
+        <div class="fchip" data-f="watched" onclick="toggleFilter('watched')">Gesehen</div>
+        <div class="fchip" data-f="bookmarked" onclick="toggleFilter('bookmarked')">★ Merkliste</div>
+        <div class="fchip" data-f="hard" onclick="toggleFilter('hard')">⚡ Schwer</div>
+      </div>
+    </div>
+
+    <div class="sidebar-scroll" id="sidebarScroll"></div>
+
+    <div class="sidebar-foot">
+      <div class="stat-pills" id="sidebarStats"></div>
+      <div class="app-links">
+        <a class="app-link" href="https://sprintdeutsch.vercel.app/" target="_blank" rel="noopener">SprintDeutsch</a>
+        <a class="app-link" href="https://karteikasten-vercel.vercel.app/" target="_blank" rel="noopener">Karteikasten</a>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== MAIN ========== -->
+  <main class="main">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <div class="logo" onclick="toggleSidebar()">
+          <div class="logo-icon"><svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21" fill="white"/></svg></div>
+          <div class="logo-text">Deutsch<span>Tube</span></div>
+        </div>
+        <div class="tabs">
+          <button class="tab on" data-v="player" onclick="setView('player')">▶ Player</button>
+          <button class="tab" data-v="stats" onclick="setView('stats')">📊 Statistik</button>
+        </div>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openDataModal()" title="Sichern / Wiederherstellen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Daten
+        </button>
+        <button class="btn" onclick="openTopicModal()">+ Thema</button>
+        <button class="btn btn-primary" onclick="openVideoModal()">+ Video</button>
+      </div>
+    </div>
+
+    <!-- PLAYER VIEW -->
+    <section class="view on" id="view-player">
+      <div class="video-info-bar" id="videoInfoBar">
+        <div class="vib-title" id="vibTitle"></div>
+        <span class="meta-badge" id="vibTopic"></span>
+        <span class="meta-badge" id="vibPlays" title="Wie oft du dieses Video gestartet hast"></span>
+        <span class="meta-badge meta-status" id="vibStatus" onclick="cycleActiveStatus()" title="Klicken zum Wechseln"></span>
+        <button class="btn btn-sm" id="loopBtn" onclick="toggleLoop()" title="Video wiederholen (Shadowing)">↻ Loop</button>
+      </div>
+
+      <div class="player-wrapper" id="playerWrapper">
+        <div class="player-placeholder" id="playerPlaceholder">
+          <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+          <div class="pp-title">Wähle ein Video</div>
+          <div class="pp-sub">Klicke links auf ein Video — oder füge mit <span class="kbd">N</span> ein neues hinzu. Mit <span class="kbd">J</span> / <span class="kbd">K</span> springst du zum nächsten bzw. vorherigen Video.</div>
+        </div>
+        <div class="autoplay-overlay" id="autoplayOverlay" style="display:none;">
+          <div class="autoplay-box">
+            <div class="autoplay-label">Nächstes Video in</div>
+            <div class="autoplay-counter" id="autoplayCounter">5</div>
+            <div class="autoplay-next-title" id="autoplayNextTitle"></div>
+            <div class="autoplay-btns">
+              <button class="autoplay-btn autoplay-now" onclick="autoplayNow()">▶ Jetzt abspielen</button>
+              <button class="autoplay-btn" onclick="autoplayCancel()">✕ Abbrechen</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes-bar" id="notesBar">
+        <div class="notes-head" onclick="toggleNotes()">
+          <span>✎ Notizen zum Video</span>
+          <span id="notesToggleIcon">▾</span>
+        </div>
+        <div class="notes-body">
+          <textarea class="notes-ta" id="notesTa" placeholder="Neue Wörter, Strukturen, Minute 4:12 nochmal hören…" oninput="saveNotes()"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATS VIEW -->
+    <section class="view" id="view-stats">
+      <div class="stats-scroll" id="statsScroll"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ========== CONTEXT MENUS ========== -->
+<div class="ctx-menu" id="ctxMenu"></div>
+
+<!-- ========== TOPIC MODAL ========== -->
+<div class="modal-overlay" id="topicModal" onclick="closeTopicModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2 id="topicModalTitle">Neues Thema</h2>
+    <p class="modal-desc">Ein Thema bündelt Videos zu einem Grammatik- oder Wortschatzbereich.</p>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" id="topicNameInput" placeholder="z.B. Konjunktiv II, Passiv, Nomen-Verb-Verbindungen…" onkeydown="if(event.key==='Enter')saveTopic()">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notiz / Ziel (optional)</label>
+      <input class="form-input" id="topicNoteInput" placeholder="z.B. bis Oktober sicher beherrschen">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Farbe</label>
+      <div class="color-options" id="topicColors"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeTopicModal()">Abbrechen</button>
+      <button class="btn btn-primary" id="topicSaveBtn" onclick="saveTopic()">Erstellen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== VIDEO MODAL ========== -->
+<div class="modal-overlay" id="videoModal" onclick="closeVideoModal(event)">
+  <div class="modal wide" onclick="event.stopPropagation()">
+    <h2 id="videoModalTitle">Video hinzufügen</h2>
+    <p class="modal-desc">Titel werden automatisch von YouTube geholt — du musst nichts abtippen.</p>
+
+    <div class="mtabs" id="videoTabs">
+      <button class="mtab on" data-p="single" onclick="setVideoTab('single')">Einzeln</button>
+      <button class="mtab" data-p="bulk" onclick="setVideoTab('bulk')">Mehrere auf einmal</button>
+    </div>
+
+    <div class="mpane on" id="pane-single">
+      <div class="form-group">
+        <label class="form-label">YouTube-URL oder Video-ID</label>
+        <input class="form-input" id="videoUrlInput" placeholder="https://www.youtube.com/watch?v=…  ·  youtu.be/…  ·  Shorts" onkeydown="if(event.key==='Enter')saveVideo()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Titel <span style="text-transform:none;font-weight:500;color:var(--text-muted);">— leer lassen = automatisch</span></label>
+        <input class="form-input" id="videoTitleInput" placeholder="wird automatisch geholt">
+      </div>
+    </div>
+
+    <div class="mpane" id="pane-bulk">
+      <div class="form-group">
+        <label class="form-label">Eine URL pro Zeile</label>
+        <textarea class="form-ta" id="bulkTa" placeholder="https://youtu.be/abc12345678
+https://www.youtube.com/watch?v=xyz98765432
+https://youtu.be/def45678901 | Eigener Titel hier"></textarea>
+        <div class="form-hint">Optional kannst du hinter der URL mit <b>|</b> einen eigenen Titel setzen. Duplikate werden automatisch übersprungen.</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Thema</label>
+      <select class="form-select" id="videoTopicSelect"></select>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="closeVideoModal()">Abbrechen</button>
+      <button class="btn btn-primary" id="videoSaveBtn" onclick="saveVideo()">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== DATA MODAL ========== -->
+<div class="modal-overlay" id="dataModal" onclick="closeDataModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2>Daten sichern &amp; übertragen</h2>
+    <p class="modal-desc">Deine Bibliothek liegt im Speicher dieses Browsers. Mit der Sicherungsdatei nimmst du sie auf jedes andere Gerät mit.</p>
+    <div id="dataSummary" style="background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;padding:13px 15px;font-size:12.5px;line-height:1.8;margin-bottom:16px;"></div>
+    <div class="modal-actions" style="justify-content:flex-start;">
+      <button class="btn btn-primary" onclick="exportData()">⬇ Sicherung herunterladen</button>
+      <button class="btn" onclick="document.getElementById('importFile').click()">⬆ Sicherung einlesen</button>
+    </div>
+    <input type="file" id="importFile" accept="application/json,.json" style="display:none" onchange="importData(event)">
+    <div class="form-hint" style="margin-top:14px;">Beim Einlesen kannst du wählen, ob zusammengeführt oder ersetzt wird. Vor jedem Import wird automatisch eine Rücksetz-Kopie angelegt.</div>
+    <div class="modal-actions" style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+      <button class="btn" style="color:var(--red);border-color:#fecaca;" onclick="resetAll()">Alles zurücksetzen</button>
+      <button class="btn" onclick="closeDataModal()">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   DeutschTube — kuratierte Video-Bibliothek
+   Speicher: localStorage (Schema v2) + JSON-Export/Import
+   ===================================================================== */
+
+const LS_KEY   = 'deutschtube_v2';
+const LS_BAK   = 'deutschtube_v2_autobackup';
+const SCHEMA   = 2;
+
+const TOPIC_COLORS = ['#f97316','#3b82f6','#8b5cf6','#22c55e','#ec4899','#eab308','#06b6d4','#f43f5e','#14b8a6','#a855f7'];
+const STATUS_ORDER  = ['to-watch','in-progress','watched'];
+const STATUS_LABELS = { 'to-watch':'Noch ansehen', 'in-progress':'In Arbeit', 'watched':'Gesehen' };
+const STATUS_NEXT   = { 'to-watch':'in-progress', 'in-progress':'watched', 'watched':'to-watch' };
+const MIN_PLAY_SEC  = 5;      // erst ab 5 s zählt es als "Abspielen"
+const AUTOPLAY_SEC  = 5;
+
+const DEFAULT_TOPICS = [
+  { id:'konjunktiv',    name:'Konjunktiv',           color:'#8b5cf6', note:'' },
+  { id:'passiv',        name:'Passiv',               color:'#3b82f6', note:'' },
+  { id:'verben',        name:'Verben & Zeiten',      color:'#22c55e', note:'' },
+  { id:'indirekte-rede',name:'Indirekte Rede',       color:'#f97316', note:'' },
+  { id:'adjektive',     name:'Adjektivdeklination',  color:'#ec4899', note:'' },
+  { id:'praepositionen',name:'Präpositionen',        color:'#06b6d4', note:'' },
+  { id:'wortschatz',    name:'Wortschatz',           color:'#eab308', note:'' },
+  { id:'hoeren',        name:'Hörverstehen',         color:'#f43f5e', note:'' },
+];
+
+/* ---------- state ---------- */
+let topics = [], videos = [], daily = {}, openTopics = {}, ui = {};
+let activeVideoId = null, editingTopicId = null, editingVideoId = null;
+let ctxTopicId = null, ctxVideoId = null;
+let searchQ = '', filters = new Set();
+let currentView = 'player', videoTab = 'single', loopOn = false;
+
+/* =====================================================================
+   STORAGE
+   ===================================================================== */
+function blankState() {
+  return { version:SCHEMA, topics:[...DEFAULT_TOPICS], videos:[], daily:{}, openTopics:{}, ui:{} };
+}
+
+function normaliseVideo(v) {
+  return {
+    id: v.id || ('vid_' + Math.random().toString(36).slice(2,10)),
+    videoId: v.videoId,
+    title: v.title || ('Video ' + v.videoId),
+    topicId: v.topicId || '',
+    status: STATUS_ORDER.includes(v.status) ? v.status : 'to-watch',
+    notes: v.notes || '',
+    bookmarked: !!v.bookmarked,
+    hard: !!v.hard,
+    plays: Number(v.plays) || 0,
+    seconds: Number(v.seconds) || 0,
+    lastSeenAt: v.lastSeenAt || null,
+    addedAt: v.addedAt || new Date().toISOString(),
+  };
+}
+
+function loadData() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch {}
+
+  if (!s) {
+    // Migration aus der alten Einzeldatei-Version
+    try {
+      const ot = JSON.parse(localStorage.getItem('deutschtube_topics') || 'null');
+      const ov = JSON.parse(localStorage.getItem('deutschtube_videos') || 'null');
+      const oo = JSON.parse(localStorage.getItem('deutschtube_open')   || 'null');
+      if (ot || ov) {
+        s = { version:SCHEMA, topics: ot || [...DEFAULT_TOPICS], videos: ov || [], daily:{}, openTopics: oo || {}, ui:{} };
+      }
+    } catch {}
+  }
+  if (!s) s = blankState();
+
+  topics     = (s.topics && s.topics.length ? s.topics : [...DEFAULT_TOPICS])
+                 .map(t => ({ id:t.id, name:t.name, color:t.color || TOPIC_COLORS[0], note:t.note || '' }));
+  videos     = (s.videos || []).filter(v => v && v.videoId).map(normaliseVideo);
+  daily      = s.daily || {};
+  openTopics = s.openTopics || {};
+  ui         = s.ui || {};
+  loopOn     = !!ui.loop;
+}
+
+let saveTimer = null;
+function saveData(now) {
+  const write = () => {
+    const payload = { version:SCHEMA, topics, videos, daily, openTopics, ui, savedAt:new Date().toISOString() };
+    try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); }
+    catch (e) { showToast('Speicher voll — bitte eine Sicherung herunterladen.'); }
+  };
+  clearTimeout(saveTimer);
+  if (now) write(); else saveTimer = setTimeout(write, 250);
+}
+
+function stateBlob() {
+  return { app:'DeutschTube', version:SCHEMA, exportedAt:new Date().toISOString(), topics, videos, daily, openTopics, ui };
+}
+
+/* =====================================================================
+   UTILITIES
+   ===================================================================== */
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+function todayKey(d) { const x = d || new Date(); return x.getFullYear() + '-' + String(x.getMonth()+1).padStart(2,'0') + '-' + String(x.getDate()).padStart(2,'0'); }
+function fmtMin(sec) {
+  sec = Math.round(sec || 0);
+  if (sec < 60) return sec + ' s';
+  const m = Math.round(sec/60);
+  if (m < 60) return m + ' min';
+  const h = Math.floor(m/60), r = m % 60;
+  return h + ' h' + (r ? ' ' + r + ' min' : '');
+}
+function daysSince(iso) {
+  if (!iso) return null;
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+}
+function agoText(iso) {
+  const d = daysSince(iso);
+  if (d === null) return 'nie gesehen';
+  if (d === 0) return 'heute';
+  if (d === 1) return 'gestern';
+  if (d < 7) return 'vor ' + d + ' Tagen';
+  if (d < 30) return 'vor ' + Math.floor(d/7) + ' Wochen';
+  return 'vor ' + Math.floor(d/30) + ' Monaten';
+}
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._tm); t._tm = setTimeout(() => t.classList.remove('show'), 2600);
+}
+function topicOf(v) { return topics.find(t => t.id === v.topicId) || null; }
+function videosOfTopic(id) { return videos.filter(v => v.topicId === id); }
+
+/* =====================================================================
+   YOUTUBE HELPERS
+   ===================================================================== */
+function extractVideoId(input) {
+  if (!input) return null;
+  input = String(input).trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(input)) return input;
+  try {
+    let url;
+    try { url = new URL(input); } catch { url = new URL('https://' + input); }
+    const host = url.hostname.replace(/^www\./,'').replace(/^m\./,'');
+    const path = url.pathname;
+    if (host === 'youtu.be') {
+      const id = path.split('/').filter(Boolean)[0];
+      if (id && /^[A-Za-z0-9_-]{11}$/.test(id.slice(0,11))) return id.slice(0,11);
+    }
+    if (host === 'youtube.com' || host === 'music.youtube.com' || host === 'youtube-nocookie.com') {
+      const vp = url.searchParams.get('v');
+      if (vp && /^[A-Za-z0-9_-]{11}$/.test(vp)) return vp;
+      const seg = path.split('/').filter(Boolean);
+      const known = ['embed','v','shorts','live','watch','clip'];
+      if (seg.length >= 2 && known.includes(seg[0])) {
+        const c = seg[1].slice(0,11);
+        if (/^[A-Za-z0-9_-]{11}$/.test(c)) return c;
+      }
+      for (const s of seg) {
+        const c = s.slice(0,11);
+        if (s.length >= 11 && /^[A-Za-z0-9_-]{11}$/.test(c)) return c;
+      }
+    }
+  } catch {}
+  const m = input.match(/[?&/=]([A-Za-z0-9_-]{11})(?:[?&#/]|$)/);
+  return m ? m[1] : null;
+}
+
+/* Titel automatisch von YouTube holen (oEmbed, CORS-freundlich) */
+async function fetchTitle(videoId) {
+  const url = 'https://www.youtube.com/watch?v=' + videoId;
+  try {
+    const r = await fetch('https://www.youtube.com/oembed?url=' + encodeURIComponent(url) + '&format=json');
+    if (r.ok) { const j = await r.json(); if (j.title) return { title:j.title, author:j.author_name || '' }; }
+  } catch {}
+  try {
+    const r = await fetch('https://noembed.com/embed?url=' + encodeURIComponent(url));
+    if (r.ok) { const j = await r.json(); if (j.title) return { title:j.title, author:j.author_name || '' }; }
+  } catch {}
+  return null;
+}
+
+async function backfillTitles() {
+  const need = videos.filter(v => !v.title || /^Video [A-Za-z0-9_-]{11}$/.test(v.title));
+  if (!need.length) return;
+  let n = 0;
+  for (const v of need.slice(0, 25)) {
+    const info = await fetchTitle(v.videoId);
+    if (info) { v.title = info.title; n++; }
+  }
+  if (n) { saveData(true); renderSidebar(); showToast(n + ' Titel automatisch ergänzt.'); }
+}
+
+/* =====================================================================
+   SIDEBAR RENDERING
+   ===================================================================== */
+function statusIconSVG(status) {
+  if (status === 'watched') return `<svg viewBox="0 0 20 20" width="18" height="18"><circle cx="10" cy="10" r="9" fill="#4ade80"/><path d="M6 10.5l2.8 2.8 5.2-5.6" stroke="#fff" stroke-width="2.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (status === 'in-progress') return `<svg viewBox="0 0 20 20" width="18" height="18"><circle cx="10" cy="10" r="7.5" fill="none" stroke="#60a5fa" stroke-width="2"/><path d="M10 3.5a6.5 6.5 0 0 1 0 13z" fill="#60a5fa"/></svg>`;
+  return `<svg viewBox="0 0 20 20" width="18" height="18"><circle cx="10" cy="10" r="7.5" fill="none" stroke="#78787a" stroke-width="1.8"/></svg>`;
+}
+
+function matchesFilter(v) {
+  if (searchQ) {
+    const t = topicOf(v);
+    const hay = ((v.title||'') + ' ' + (v.notes||'') + ' ' + (t ? t.name : '')).toLowerCase();
+    if (!hay.includes(searchQ)) return false;
+  }
+  if (!filters.size) return true;
+  for (const f of filters) {
+    if (f === 'bookmarked' && v.bookmarked) return true;
+    if (f === 'hard' && v.hard) return true;
+    if (STATUS_ORDER.includes(f) && (v.status||'to-watch') === f) return true;
+  }
+  return false;
+}
+
+function renderVideoItem(v) {
+  const t = topicOf(v);
+  const bits = [];
+  if (v.plays > 0) bits.push(`<b>${v.plays}×</b> gesehen`);
+  if (v.seconds > 30) bits.push(fmtMin(v.seconds));
+  if (v.lastSeenAt) bits.push(agoText(v.lastSeenAt));
+  if (!bits.length) bits.push(STATUS_LABELS[v.status||'to-watch']);
+  return `
+    <div class="video-item ${activeVideoId===v.id?'active':''}" onclick="playVideo('${v.id}')" oncontextmenu="showVideoCtx(event,'${v.id}')" title="${esc(v.title)}">
+      <div class="vi-status-icon">${statusIconSVG(v.status||'to-watch')}</div>
+      <div class="vi-info">
+        <div class="vi-name">${esc(v.title || 'Unbenanntes Video')}</div>
+        <div class="vi-sub">${bits.join(' · ')}</div>
+      </div>
+      <div class="vi-actions">
+        <div class="vi-btn hard ${v.hard?'on':''}" onclick="event.stopPropagation();toggleHard('${v.id}')" title="Als schwer markieren — fließt in die Schwachstellen-Analyse ein">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="${v.hard?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div class="vi-btn ${v.bookmarked?'on':''}" onclick="event.stopPropagation();toggleBookmark('${v.id}')" title="Merkliste">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="${v.bookmarked?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="vi-btn del" onclick="event.stopPropagation();confirmDeleteVideo('${v.id}')" title="Löschen">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSidebar() {
+  const el = document.getElementById('sidebarScroll');
+  const filtering = !!(searchQ || filters.size);
+  let html = '';
+  let shown = 0;
+
+  topics.forEach(t => {
+    const all = videosOfTopic(t.id);
+    const list = all.filter(matchesFilter);
+    if (filtering && !list.length) return;
+    shown += list.length;
+    const isOpen = filtering ? true : openTopics[t.id] !== false;
+    const watched = all.filter(v => v.status === 'watched').length;
+    const pct = all.length ? Math.round(watched / all.length * 100) : 0;
+
+    html += `
+      <div class="topic-section ${isOpen?'open':''}" data-topic="${t.id}">
+        <div class="topic-header" onclick="toggleTopic('${t.id}')" oncontextmenu="showTopicCtx(event,'${t.id}')" title="${esc(t.note || t.name)}">
+          <div class="topic-header-left">
+            <span class="topic-dot" style="background:${t.color}"></span>
+            <span class="topic-title">${esc(t.name)}</span>
+          </div>
+          <span class="topic-count">${watched}/${all.length}</span>
+          <svg class="topic-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        ${all.length ? `<div class="topic-progress"><div style="width:${pct}%;background:${t.color}"></div></div>` : ''}
+        <div class="topic-videos">
+          ${list.length ? list.map(renderVideoItem).join('')
+            : `<div class="empty-hint">Keine Videos — Rechtsklick aufs Thema → „Video hinzufügen“</div>`}
+        </div>
+      </div>`;
+  });
+
+  const unassignedAll = videos.filter(v => !v.topicId || !topics.find(t => t.id === v.topicId));
+  const unassigned = unassignedAll.filter(matchesFilter);
+  if (unassigned.length) {
+    shown += unassigned.length;
+    const isOpen = filtering ? true : openTopics['_unassigned'] !== false;
+    html += `
+      <div class="topic-section ${isOpen?'open':''}" data-topic="_unassigned">
+        <div class="topic-header" onclick="toggleTopic('_unassigned')">
+          <div class="topic-header-left">
+            <span class="topic-dot" style="background:#8a8498"></span>
+            <span class="topic-title">Ohne Thema</span>
+          </div>
+          <span class="topic-count">${unassignedAll.length}</span>
+          <svg class="topic-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="topic-videos">${unassigned.map(renderVideoItem).join('')}</div>
+      </div>`;
+  }
+
+  if (filtering && !shown) html = `<div class="empty-hint" style="padding:22px 16px;text-align:center;font-style:normal;">Nichts gefunden.</div>`;
+  if (!videos.length && !filtering) html += `<div class="empty-hint" style="padding:20px 16px;text-align:center;font-style:normal;line-height:1.7;">Noch keine Videos.<br>Klicke oben rechts auf <b style="color:#c4b5fd">+ Video</b>.</div>`;
+
+  el.innerHTML = html;
+}
+
+function updateStats() {
+  const total = videos.length;
+  const watched = videos.filter(v => v.status === 'watched').length;
+  const inProg  = videos.filter(v => v.status === 'in-progress').length;
+  const open    = total - watched - inProg;
+  const totalSec = videos.reduce((s,v) => s + (v.seconds||0), 0);
+  document.getElementById('sidebarStats').innerHTML = `
+    <div class="stat-pill"><span class="stat-dot" style="background:var(--green)"></span>${watched} gesehen</div>
+    <div class="stat-pill"><span class="stat-dot" style="background:var(--blue)"></span>${inProg} in Arbeit</div>
+    <div class="stat-pill"><span class="stat-dot" style="background:#787878"></span>${open} offen</div>
+    <div class="stat-pill" title="Gesamte Wiedergabezeit">⏱ ${fmtMin(totalSec)}</div>`;
+}
+
+/* ---------- sidebar interactions ---------- */
+function toggleTopic(id) { openTopics[id] = openTopics[id] === false ? true : false; saveData(); renderSidebar(); }
+function toggleBookmark(id) { const v = videos.find(x=>x.id===id); if(!v) return; v.bookmarked = !v.bookmarked; saveData(); renderSidebar(); }
+function toggleHard(id) {
+  const v = videos.find(x=>x.id===id); if(!v) return;
+  v.hard = !v.hard; saveData(); renderSidebar(); if (currentView==='stats') renderStats();
+  showToast(v.hard ? 'Als schwer markiert — erscheint in den Schwachstellen.' : 'Markierung entfernt.');
+}
+function toggleSidebar() {
+  const app = document.getElementById('app');
+  if (window.innerWidth <= 860) app.classList.toggle('mobile-open');
+  else app.classList.toggle('collapsed');
+}
+function onSearch() { searchQ = document.getElementById('searchInput').value.trim().toLowerCase(); renderSidebar(); }
+function clearSearch() { document.getElementById('searchInput').value=''; searchQ=''; renderSidebar(); }
+function toggleFilter(f) {
+  if (filters.has(f)) filters.delete(f); else filters.add(f);
+  document.querySelectorAll('.fchip').forEach(c => c.classList.toggle('on', filters.has(c.dataset.f)));
+  renderSidebar();
+}
+
+/* =====================================================================
+   VIEWS
+   ===================================================================== */
+function setView(v) {
+  currentView = v;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.v === v));
+  document.querySelectorAll('.view').forEach(s => s.classList.toggle('on', s.id === 'view-' + v));
+  if (v === 'stats') renderStats();
+}
+
+/* =====================================================================
+   YOUTUBE PLAYER + ZEITERFASSUNG
+   ===================================================================== */
+let ytPlayer = null, ytApiReady = false, tickTimer = null;
+let sessionSec = 0, sessionCounted = false;
+
+window.onYouTubeIframeAPIReady = function() { ytApiReady = true; };
+(function loadYTApi() {
+  if (document.getElementById('yt-api-script')) return;
+  const tag = document.createElement('script');
+  tag.id = 'yt-api-script'; tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+})();
+
+function startTicking() {
+  clearInterval(tickTimer);
+  tickTimer = setInterval(() => {
+    if (!ytPlayer || !activeVideoId) return;
+    let state = -1;
+    try { state = ytPlayer.getPlayerState(); } catch { return; }
+    if (state !== 1) return;                       // 1 = PLAYING
+    const v = videos.find(x => x.id === activeVideoId);
+    if (!v) return;
+    v.seconds = (v.seconds || 0) + 1;
+    sessionSec++;
+    daily[todayKey()] = (daily[todayKey()] || 0) + 1;
+    if (!sessionCounted && sessionSec >= MIN_PLAY_SEC) {
+      sessionCounted = true;
+      v.plays = (v.plays || 0) + 1;
+      v.lastSeenAt = new Date().toISOString();
+      if (v.status === 'to-watch') v.status = 'in-progress';
+      renderSidebar(); refreshInfoBar();
+    }
+    if (sessionSec % 10 === 0) saveData();
+  }, 1000);
+}
+
+function flushSession() {
+  if (activeVideoId) {
+    const v = videos.find(x => x.id === activeVideoId);
+    if (v && sessionSec > 0) v.lastSeenAt = new Date().toISOString();
+  }
+  sessionSec = 0; sessionCounted = false;
+  saveData(true);
+}
+
+function playVideo(id) {
+  if (autoplayTimer) autoplayCancel();
+  const v = videos.find(x => x.id === id);
+  if (!v) return;
+
+  flushSession();
+  activeVideoId = id;
+  if (v.status === 'to-watch') v.status = 'in-progress';
+  setView('player');
+  if (window.innerWidth <= 860) document.getElementById('app').classList.remove('mobile-open');
+
+  const wrapper = document.getElementById('playerWrapper');
+  const ph = document.getElementById('playerPlaceholder');
+  if (ph) ph.style.display = 'none';
+
+  function create(videoId) {
+    const old = document.getElementById('ytFrame'); if (old) old.remove();
+    if (ytPlayer) { try { ytPlayer.destroy(); } catch {} ytPlayer = null; }
+    const div = document.createElement('div');
+    div.id = 'ytFrame'; div.className = 'youtube-frame';
+    wrapper.insertBefore(div, wrapper.firstChild);
+    ytPlayer = new YT.Player('ytFrame', {
+      videoId,
+      playerVars: { autoplay:1, rel:0, modestbranding:1, origin:window.location.origin },
+      events: {
+        onReady: startTicking,
+        onStateChange: e => {
+          if (e.data !== 0) return;                // 0 = ENDED
+          const vid = videos.find(x => x.id === activeVideoId);
+          if (vid && vid.status !== 'watched') { vid.status = 'watched'; renderSidebar(); refreshInfoBar(); }
+          flushSession();
+          if (loopOn) { sessionCounted = false; try { ytPlayer.seekTo(0); ytPlayer.playVideo(); } catch {} return; }
+          const next = getNextVideo(activeVideoId);
+          if (next) startAutoplayCountdown(next);
+        }
+      }
+    });
+  }
+
+  if (ytApiReady) create(v.videoId);
+  else { const p = setInterval(() => { if (ytApiReady) { clearInterval(p); create(v.videoId); } }, 100); }
+
+  document.getElementById('notesTa').value = v.notes || '';
+  refreshInfoBar();
+  saveData();
+  renderSidebar();
+  updateStats();
+  history.replaceState(null, '', '?v=' + v.videoId);
+}
+
+function refreshInfoBar() {
+  const v = videos.find(x => x.id === activeVideoId); if (!v) return;
+  const t = topicOf(v);
+  document.getElementById('videoInfoBar').classList.add('show');
+  document.getElementById('vibTitle').textContent = v.title || 'Unbenanntes Video';
+  const tb = document.getElementById('vibTopic');
+  if (t) { tb.style.cssText = `background:${t.color}1f;color:${t.color};`; tb.textContent = '● ' + t.name; tb.style.display=''; }
+  else tb.style.display = 'none';
+  const pb = document.getElementById('vibPlays');
+  pb.textContent = `${v.plays||0}× · ${fmtMin(v.seconds||0)}`;
+  const sb = document.getElementById('vibStatus');
+  sb.className = 'meta-badge meta-status status-' + (v.status||'to-watch');
+  sb.textContent = STATUS_LABELS[v.status||'to-watch'];
+  document.getElementById('loopBtn').style.cssText = loopOn ? 'background:var(--accent);color:#fff;border-color:var(--accent);' : '';
+}
+
+function toggleLoop() { loopOn = !loopOn; ui.loop = loopOn; saveData(); refreshInfoBar(); showToast(loopOn ? 'Loop an — Video wiederholt sich.' : 'Loop aus.'); }
+
+function cycleStatus(id) {
+  const v = videos.find(x => x.id === id); if (!v) return;
+  v.status = STATUS_NEXT[v.status || 'to-watch'];
+  saveData(); renderSidebar(); updateStats();
+  if (id === activeVideoId) refreshInfoBar();
+  showToast('Status: ' + STATUS_LABELS[v.status]);
+}
+function cycleActiveStatus() { if (activeVideoId) cycleStatus(activeVideoId); }
+
+function saveNotes() {
+  const v = videos.find(x => x.id === activeVideoId); if (!v) return;
+  v.notes = document.getElementById('notesTa').value;
+  saveData();
+}
+function toggleNotes() {
+  const b = document.getElementById('notesBar');
+  b.classList.toggle('open');
+  document.getElementById('notesToggleIcon').textContent = b.classList.contains('open') ? '▴' : '▾';
+}
+
+/* ---------- ordered list / autoplay ---------- */
+function orderedVideos() {
+  const out = [];
+  topics.forEach(t => videosOfTopic(t.id).forEach(v => out.push(v)));
+  videos.filter(v => !v.topicId || !topics.find(t => t.id === v.topicId)).forEach(v => out.push(v));
+  return out;
+}
+function getNextVideo(id) { const o = orderedVideos(), i = o.findIndex(v => v.id === id); return (i === -1 || i >= o.length-1) ? null : o[i+1]; }
+function getPrevVideo(id) { const o = orderedVideos(), i = o.findIndex(v => v.id === id); return i <= 0 ? null : o[i-1]; }
+
+let autoplayTimer = null, autoplayNextId = null;
+function startAutoplayCountdown(next) {
+  autoplayNextId = next.id;
+  let s = AUTOPLAY_SEC;
+  document.getElementById('autoplayCounter').textContent = s;
+  document.getElementById('autoplayNextTitle').textContent = next.title || 'Nächstes Video';
+  document.getElementById('autoplayOverlay').style.display = 'flex';
+  autoplayTimer = setInterval(() => {
+    s--; document.getElementById('autoplayCounter').textContent = s;
+    if (s <= 0) autoplayNow();
+  }, 1000);
+}
+function autoplayNow() { const id = autoplayNextId; autoplayCancel(); if (id) playVideo(id); }
+function autoplayCancel() {
+  clearInterval(autoplayTimer); autoplayTimer = null; autoplayNextId = null;
+  document.getElementById('autoplayOverlay').style.display = 'none';
+}
+
+/* =====================================================================
+   KONTEXTMENÜS
+   ===================================================================== */
+function openCtx(e, html) {
+  e.preventDefault(); e.stopPropagation();
+  const m = document.getElementById('ctxMenu');
+  m.innerHTML = html; m.classList.add('show');
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(e.clientX, window.innerWidth  - r.width  - 10) + 'px';
+  m.style.top  = Math.min(e.clientY, window.innerHeight - r.height - 10) + 'px';
+}
+function hideCtx() { document.getElementById('ctxMenu').classList.remove('show'); }
+document.addEventListener('click', hideCtx);
+
+const ICO = {
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  up:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="18 15 12 9 6 15"/></svg>',
+  down:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2m1 0v14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6z"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>',
+  move:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9l-3 3 3 3M19 9l3 3-3 3M9 5l3-3 3 3M9 19l3 3 3-3"/></svg>',
+  link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>',
+  reset:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/></svg>',
+};
+
+function showTopicCtx(e, id) {
+  ctxTopicId = id; ctxVideoId = null;
+  openCtx(e, `
+    <div class="ctx-item" onclick="openVideoModal(null,'${id}')">${ICO.plus} Video hinzufügen</div>
+    <div class="ctx-item" onclick="openTopicModal('${id}')">${ICO.edit} Thema bearbeiten</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" onclick="moveTopic('${id}',-1)">${ICO.up} Nach oben</div>
+    <div class="ctx-item" onclick="moveTopic('${id}',1)">${ICO.down} Nach unten</div>
+    <div class="ctx-item" onclick="markTopicWatched('${id}')">${ICO.check} Alle als gesehen</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item danger" onclick="deleteTopic('${id}')">${ICO.trash} Thema löschen</div>`);
+}
+
+function showVideoCtx(e, id) {
+  ctxVideoId = id; ctxTopicId = null;
+  const v = videos.find(x => x.id === id); if (!v) return;
+  const moves = topics.filter(t => t.id !== v.topicId)
+    .map(t => `<div class="ctx-item" onclick="moveVideoTo('${id}','${t.id}')"><span class="tdot" style="background:${t.color};margin:0"></span> ${esc(t.name)}</div>`).join('');
+  openCtx(e, `
+    <div class="ctx-item" onclick="openVideoModal('${id}')">${ICO.edit} Bearbeiten</div>
+    <div class="ctx-item" onclick="cycleStatus('${id}')">${ICO.check} Status wechseln</div>
+    <div class="ctx-item" onclick="resetVideoStats('${id}')">${ICO.reset} Zähler zurücksetzen</div>
+    <div class="ctx-item" onclick="window.open('https://www.youtube.com/watch?v=${v.videoId}','_blank')">${ICO.link} Auf YouTube öffnen</div>
+    ${moves ? `<div class="ctx-sep"></div><div style="font-size:10px;font-weight:700;color:var(--text-muted);padding:5px 11px 3px;text-transform:uppercase;letter-spacing:.5px;">Verschieben nach</div>${moves}` : ''}
+    <div class="ctx-sep"></div>
+    <div class="ctx-item danger" onclick="confirmDeleteVideo('${id}')">${ICO.trash} Löschen</div>`);
+}
+
+function moveTopic(id, dir) {
+  const i = topics.findIndex(t => t.id === id); const j = i + dir;
+  if (i < 0 || j < 0 || j >= topics.length) return;
+  [topics[i], topics[j]] = [topics[j], topics[i]];
+  saveData(); renderSidebar();
+}
+function markTopicWatched(id) {
+  videosOfTopic(id).forEach(v => v.status = 'watched');
+  saveData(); renderSidebar(); updateStats(); showToast('Thema komplett als gesehen markiert.');
+}
+function moveVideoTo(vid, tid) {
+  const v = videos.find(x => x.id === vid); if (!v) return;
+  v.topicId = tid; openTopics[tid] = true;
+  saveData(); renderSidebar(); if (vid === activeVideoId) refreshInfoBar();
+  showToast('Verschoben nach „' + (topics.find(t=>t.id===tid)||{}).name + '“.');
+}
+function resetVideoStats(id) {
+  const v = videos.find(x => x.id === id); if (!v) return;
+  v.plays = 0; v.seconds = 0; v.lastSeenAt = null; v.status = 'to-watch';
+  saveData(); renderSidebar(); updateStats(); showToast('Zähler zurückgesetzt.');
+}
+
+/* =====================================================================
+   THEMEN-CRUD
+   ===================================================================== */
+function renderTopicColors(sel) {
+  document.getElementById('topicColors').innerHTML = TOPIC_COLORS.map(c =>
+    `<div class="color-opt ${c===sel?'selected':''}" style="background:${c}" data-color="${c}" onclick="selectTopicColor(this)"></div>`).join('');
+}
+function selectTopicColor(el) {
+  document.querySelectorAll('#topicColors .color-opt').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+}
+function openTopicModal(id) {
+  hideCtx();
+  editingTopicId = id || null;
+  const t = id ? topics.find(x => x.id === id) : null;
+  renderTopicColors(t ? t.color : TOPIC_COLORS[topics.length % TOPIC_COLORS.length]);
+  document.getElementById('topicModalTitle').textContent = t ? 'Thema bearbeiten' : 'Neues Thema';
+  document.getElementById('topicSaveBtn').textContent   = t ? 'Speichern' : 'Erstellen';
+  document.getElementById('topicNameInput').value = t ? t.name : '';
+  document.getElementById('topicNoteInput').value = t ? (t.note||'') : '';
+  document.getElementById('topicModal').classList.add('show');
+  setTimeout(() => document.getElementById('topicNameInput').focus(), 40);
+}
+function closeTopicModal(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('topicModal').classList.remove('show'); editingTopicId = null;
+}
+function saveTopic() {
+  const name = document.getElementById('topicNameInput').value.trim();
+  if (!name) { showToast('Bitte einen Namen eingeben.'); return; }
+  const note  = document.getElementById('topicNoteInput').value.trim();
+  const color = (document.querySelector('#topicColors .color-opt.selected') || {}).dataset?.color || TOPIC_COLORS[0];
+  if (editingTopicId) {
+    const t = topics.find(x => x.id === editingTopicId);
+    if (t) { t.name = name; t.color = color; t.note = note; }
+  } else {
+    const id = 'topic_' + Date.now();
+    topics.push({ id, name, color, note });
+    openTopics[id] = true;
+  }
+  saveData(true); renderSidebar(); updateStats(); closeTopicModal();
+  showToast(editingTopicId ? 'Thema aktualisiert.' : 'Thema „' + name + '“ erstellt.');
+}
+function deleteTopic(id) {
+  hideCtx();
+  const t = topics.find(x => x.id === id); if (!t) return;
+  const n = videosOfTopic(id).length;
+  if (!confirm(`Thema „${t.name}“ löschen?` + (n ? `\n${n} Video(s) wandern nach „Ohne Thema“ — sie bleiben erhalten.` : ''))) return;
+  videos.forEach(v => { if (v.topicId === id) v.topicId = ''; });
+  topics = topics.filter(x => x.id !== id);
+  delete openTopics[id];
+  saveData(true); renderSidebar(); updateStats(); showToast('Thema gelöscht.');
+}
+
+/* =====================================================================
+   VIDEO-CRUD
+   ===================================================================== */
+function setVideoTab(p) {
+  videoTab = p;
+  document.querySelectorAll('#videoTabs .mtab').forEach(b => b.classList.toggle('on', b.dataset.p === p));
+  document.querySelectorAll('.mpane').forEach(el => el.classList.toggle('on', el.id === 'pane-' + p));
+  document.getElementById('videoSaveBtn').textContent = p === 'bulk' ? 'Alle hinzufügen' : (editingVideoId ? 'Speichern' : 'Hinzufügen');
+}
+function openVideoModal(id, presetTopic) {
+  hideCtx();
+  editingVideoId = id || null;
+  const sel = document.getElementById('videoTopicSelect');
+  sel.innerHTML = `<option value="">— Ohne Thema —</option>` + topics.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  document.getElementById('videoTabs').style.display = id ? 'none' : '';
+  setVideoTab('single');
+  if (id) {
+    const v = videos.find(x => x.id === id); if (!v) return;
+    document.getElementById('videoModalTitle').textContent = 'Video bearbeiten';
+    document.getElementById('videoSaveBtn').textContent = 'Speichern';
+    document.getElementById('videoUrlInput').value = 'https://www.youtube.com/watch?v=' + v.videoId;
+    document.getElementById('videoTitleInput').value = v.title || '';
+    sel.value = v.topicId || '';
+  } else {
+    document.getElementById('videoModalTitle').textContent = 'Video hinzufügen';
+    document.getElementById('videoUrlInput').value = '';
+    document.getElementById('videoTitleInput').value = '';
+    document.getElementById('bulkTa').value = '';
+    sel.value = presetTopic || ui.lastTopic || '';
+  }
+  document.getElementById('videoModal').classList.add('show');
+  setTimeout(() => document.getElementById('videoUrlInput').focus(), 40);
+}
+function closeVideoModal(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('videoModal').classList.remove('show'); editingVideoId = null;
+}
+
+async function saveVideo() {
+  const topicId = document.getElementById('videoTopicSelect').value;
+  const btn = document.getElementById('videoSaveBtn');
+
+  if (videoTab === 'bulk' && !editingVideoId) {
+    const lines = document.getElementById('bulkTa').value.split('\n').map(s => s.trim()).filter(Boolean);
+    if (!lines.length) { showToast('Bitte mindestens eine URL einfügen.'); return; }
+    btn.disabled = true; btn.textContent = 'Wird geladen…';
+    let added = 0, dupes = 0, bad = 0;
+    const fresh = [];
+    for (const line of lines) {
+      const [rawUrl, customTitle] = line.split('|').map(s => (s||'').trim());
+      const vid = extractVideoId(rawUrl);
+      if (!vid) { bad++; continue; }
+      if (videos.some(v => v.videoId === vid)) { dupes++; continue; }
+      const v = normaliseVideo({ videoId:vid, title: customTitle || '', topicId });
+      videos.push(v); fresh.push(v); added++;
+    }
+    if (topicId) { openTopics[topicId] = true; ui.lastTopic = topicId; }
+    saveData(true); renderSidebar(); updateStats(); closeVideoModal();
+    btn.disabled = false; setVideoTab('single');
+    showToast(`${added} hinzugefügt${dupes?`, ${dupes} Duplikat(e)`:''}${bad?`, ${bad} ungültig`:''}. Titel werden geholt…`);
+    for (const v of fresh) {
+      if (v.title) continue;
+      const info = await fetchTitle(v.videoId);
+      v.title = info ? info.title : ('Video ' + v.videoId);
+      saveData(); renderSidebar();
+    }
+    saveData(true); renderSidebar();
+    return;
+  }
+
+  const vid = extractVideoId(document.getElementById('videoUrlInput').value);
+  if (!vid) { showToast('Das sieht nicht nach einer YouTube-URL aus.'); return; }
+  let title = document.getElementById('videoTitleInput').value.trim();
+
+  if (!editingVideoId && videos.some(v => v.videoId === vid)) {
+    const ex = videos.find(v => v.videoId === vid);
+    closeVideoModal(); playVideo(ex.id);
+    showToast('Dieses Video ist bereits in deiner Bibliothek.');
+    return;
+  }
+
+  btn.disabled = true;
+  if (!title) { btn.textContent = 'Titel wird geholt…'; const info = await fetchTitle(vid); title = info ? info.title : ('Video ' + vid); }
+  btn.disabled = false; btn.textContent = editingVideoId ? 'Speichern' : 'Hinzufügen';
+
+  if (editingVideoId) {
+    const v = videos.find(x => x.id === editingVideoId);
+    if (v) { v.videoId = vid; v.title = title; v.topicId = topicId; }
+  } else {
+    videos.push(normaliseVideo({ videoId:vid, title, topicId }));
+  }
+  if (topicId) { openTopics[topicId] = true; ui.lastTopic = topicId; }
+  saveData(true); renderSidebar(); updateStats(); closeVideoModal();
+  if (activeVideoId === editingVideoId) refreshInfoBar();
+  showToast(editingVideoId ? 'Video aktualisiert.' : 'Hinzugefügt: ' + title.slice(0,52));
+}
+
+function confirmDeleteVideo(id) {
+  hideCtx();
+  const v = videos.find(x => x.id === id); if (!v) return;
+  if (!confirm(`„${v.title || 'Video'}“ wirklich löschen?\nDie Statistik dazu geht mit verloren.`)) return;
+  videos = videos.filter(x => x.id !== id);
+  if (activeVideoId === id) {
+    activeVideoId = null;
+    document.getElementById('videoInfoBar').classList.remove('show');
+    if (ytPlayer) { try { ytPlayer.destroy(); } catch {} ytPlayer = null; }
+    const f = document.getElementById('ytFrame'); if (f) f.remove();
+    document.getElementById('playerPlaceholder').style.display = '';
+  }
+  saveData(true); renderSidebar(); updateStats(); showToast('Video entfernt.');
+}
+
+/* =====================================================================
+   DATEN: EXPORT / IMPORT / RESET
+   ===================================================================== */
+function openDataModal() {
+  const sec = videos.reduce((s,v) => s + (v.seconds||0), 0);
+  const plays = videos.reduce((s,v) => s + (v.plays||0), 0);
+  document.getElementById('dataSummary').innerHTML = `
+    <b>${topics.length}</b> Themen · <b>${videos.length}</b> Videos<br>
+    <b>${plays}</b> Wiedergaben · <b>${fmtMin(sec)}</b> Gesamtzeit<br>
+    <b>${Object.keys(daily).length}</b> aktive Tage aufgezeichnet`;
+  document.getElementById('dataModal').classList.add('show');
+}
+function closeDataModal(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('dataModal').classList.remove('show');
+}
+function download(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type:'application/json' }));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function exportData() {
+  download('deutschtube-sicherung-' + todayKey() + '.json', JSON.stringify(stateBlob(), null, 2));
+  ui.lastExport = new Date().toISOString(); saveData(true);
+  showToast('Sicherung heruntergeladen.');
+}
+function importData(ev) {
+  const file = ev.target.files[0]; if (!file) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    let d;
+    try { d = JSON.parse(rd.result); } catch { showToast('Datei ist keine gültige Sicherung.'); return; }
+    if (!d || !Array.isArray(d.videos)) { showToast('Datei ist keine DeutschTube-Sicherung.'); return; }
+    localStorage.setItem(LS_BAK, JSON.stringify(stateBlob()));   // Rücksetz-Kopie
+    const merge = confirm(
+      `Sicherung enthält ${d.topics?.length||0} Themen und ${d.videos.length} Videos.\n\n` +
+      `OK  = Zusammenführen (deine aktuellen Daten bleiben, Statistik wird addiert)\n` +
+      `Abbrechen = Ersetzen (alles Aktuelle wird überschrieben)`);
+
+    if (!merge) {
+      topics = (d.topics||[]).map(t => ({ id:t.id, name:t.name, color:t.color||TOPIC_COLORS[0], note:t.note||'' }));
+      videos = d.videos.map(normaliseVideo);
+      daily = d.daily || {}; openTopics = d.openTopics || {}; ui = d.ui || {};
+    } else {
+      (d.topics||[]).forEach(t => { if (!topics.find(x => x.id === t.id || x.name === t.name)) topics.push({ id:t.id, name:t.name, color:t.color||TOPIC_COLORS[0], note:t.note||'' }); });
+      d.videos.forEach(raw => {
+        const nv = normaliseVideo(raw);
+        const cur = videos.find(v => v.videoId === nv.videoId);
+        if (!cur) { videos.push(nv); return; }
+        cur.plays   = (cur.plays||0) + (nv.plays||0);
+        cur.seconds = (cur.seconds||0) + (nv.seconds||0);
+        cur.hard    = cur.hard || nv.hard;
+        cur.bookmarked = cur.bookmarked || nv.bookmarked;
+        if (nv.notes && !cur.notes) cur.notes = nv.notes;
+        if (STATUS_ORDER.indexOf(nv.status) > STATUS_ORDER.indexOf(cur.status)) cur.status = nv.status;
+        if (nv.lastSeenAt && (!cur.lastSeenAt || nv.lastSeenAt > cur.lastSeenAt)) cur.lastSeenAt = nv.lastSeenAt;
+      });
+      Object.entries(d.daily || {}).forEach(([k, s]) => { daily[k] = Math.max(daily[k] || 0, s); });
+    }
+    saveData(true); renderSidebar(); updateStats(); if (currentView === 'stats') renderStats();
+    closeDataModal();
+    showToast(merge ? 'Sicherung zusammengeführt.' : 'Sicherung eingelesen.');
+  };
+  rd.readAsText(file);
+  ev.target.value = '';
+}
+function resetAll() {
+  if (!confirm('Wirklich ALLES löschen — Themen, Videos und Statistik?\n\nTipp: Lade vorher eine Sicherung herunter.')) return;
+  localStorage.setItem(LS_BAK, JSON.stringify(stateBlob()));
+  const s = blankState();
+  topics = s.topics; videos = []; daily = {}; openTopics = {}; ui = {};
+  activeVideoId = null;
+  saveData(true); renderSidebar(); updateStats(); closeDataModal();
+  showToast('Zurückgesetzt. (Eine Rücksetz-Kopie liegt im Browser.)');
+}
+
+/* =====================================================================
+   STATISTIK
+   ===================================================================== */
+function topicStats() {
+  return topics.map(t => {
+    const vs = videosOfTopic(t.id);
+    const played = vs.filter(v => (v.plays||0) > 0);
+    const plays = vs.reduce((s,v) => s + (v.plays||0), 0);
+    const sec   = vs.reduce((s,v) => s + (v.seconds||0), 0);
+    const hard  = vs.filter(v => v.hard).length;
+    const watched = vs.filter(v => v.status === 'watched').length;
+    const last  = vs.reduce((a,v) => (v.lastSeenAt && (!a || v.lastSeenAt > a)) ? v.lastSeenAt : a, null);
+
+    const repeatIdx = played.length ? plays / played.length : 0;
+    const repeatScore = Math.max(0, Math.min(1, (repeatIdx - 1) / 3));
+    const hardScore   = vs.length ? hard / vs.length : 0;
+    const secPerVideo = played.length ? sec / played.length : 0;
+    const intensity   = Math.max(0, Math.min(1, secPerVideo / 1800));
+    const score = played.length || hard
+      ? Math.round(100 * (0.5*repeatScore + 0.3*hardScore + 0.2*intensity))
+      : 0;
+
+    return { t, count:vs.length, played:played.length, plays, sec, hard, watched, last, repeatIdx, score };
+  });
+}
+
+function streakInfo() {
+  const keys = Object.keys(daily).filter(k => daily[k] > 60).sort();
+  if (!keys.length) return { streak:0, best:0, activeDays:0 };
+  const set = new Set(keys);
+  let streak = 0;
+  for (let i = 0; ; i++) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    if (set.has(todayKey(d))) streak++;
+    else if (i === 0) continue;              // heute noch nichts = ok
+    else break;
+  }
+  let best = 0, run = 0, prev = null;
+  keys.forEach(k => {
+    const d = new Date(k + 'T00:00:00');
+    run = (prev && (d - prev) === 86400000) ? run + 1 : 1;
+    best = Math.max(best, run); prev = d;
+  });
+  return { streak, best, activeDays: keys.length };
+}
+
+function heatColor(sec) {
+  if (!sec) return 'var(--bg-input)';
+  if (sec < 300)  return '#ddd6fe';
+  if (sec < 900)  return '#c4b5fd';
+  if (sec < 1800) return '#a78bfa';
+  if (sec < 3600) return '#8b5cf6';
+  return '#6b3fa0';
+}
+
+function renderStats() {
+  const el = document.getElementById('statsScroll');
+  if (!videos.length) {
+    el.innerHTML = `<div class="empty-state">Noch keine Daten.<br>Füge Videos hinzu und schau sie an — dann erscheint hier, welche Themen dich am meisten beschäftigen.</div>`;
+    return;
+  }
+
+  const ts = topicStats();
+  const totalSec   = videos.reduce((s,v) => s + (v.seconds||0), 0);
+  const totalPlays = videos.reduce((s,v) => s + (v.plays||0), 0);
+  const watched    = videos.filter(v => v.status === 'watched').length;
+  const st = streakInfo();
+  let h = '';
+
+  /* --- KPI --- */
+  h += `<div class="kpi-grid">
+    <div class="kpi"><div class="kpi-val">${videos.length}</div><div class="kpi-lbl">Videos</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--green)">${watched}</div><div class="kpi-lbl">durchgesehen</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--accent)">${fmtMin(totalSec)}</div><div class="kpi-lbl">Gesamtzeit</div></div>
+    <div class="kpi"><div class="kpi-val">${totalPlays}</div><div class="kpi-lbl">Wiedergaben</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:var(--orange)">${st.streak}</div><div class="kpi-lbl">Tage in Folge</div></div>
+    <div class="kpi"><div class="kpi-val">${st.activeDays}</div><div class="kpi-lbl">aktive Tage</div></div>
+  </div>`;
+
+  /* --- Schwachstellen --- */
+  const weak = ts.filter(x => x.score > 0).sort((a,b) => b.score - a.score).slice(0, 8);
+  h += `<div class="s-h2">⚡ Schwachstellen — was dich am meisten beschäftigt</div>
+        <div class="s-sub">Der Wert steigt, je öfter du Videos eines Themas <b>wiederholst</b> (50 %), wie viele du als <b>schwer</b> markiert hast (30 %) und wie viel <b>Zeit</b> pro Video hineingeht (20 %). Hoher Wert = hier steckst du fest.</div>
+        <div class="card">`;
+  if (!weak.length) {
+    h += `<div class="empty-state" style="padding:22px">Noch nichts wiederholt. Sobald du Videos ein zweites Mal ansiehst oder mit ⚡ als schwer markierst, erscheint hier deine Rangliste.</div>`;
+  } else {
+    weak.forEach((x, i) => {
+      const col = x.score >= 60 ? 'var(--red)' : x.score >= 35 ? 'var(--orange)' : 'var(--yellow)';
+      const why = [];
+      if (x.repeatIdx > 1.2) why.push(`${x.repeatIdx.toFixed(1)}× pro Video wiederholt`);
+      if (x.hard) why.push(`${x.hard} als schwer markiert`);
+      if (x.sec) why.push(fmtMin(x.sec) + ' investiert');
+      h += `<div class="weak-item">
+        <div class="weak-rank" style="background:${x.t.color}">${i+1}</div>
+        <div class="weak-body">
+          <div class="weak-name">${esc(x.t.name)}</div>
+          <div class="weak-why">${why.join(' · ') || '—'}</div>
+        </div>
+        <div class="weak-score" style="background:${col}1a;color:${col}">${x.score}</div>
+      </div>`;
+    });
+  }
+  h += `</div>`;
+
+  /* --- Top wiederholte Videos --- */
+  const topVids = videos.filter(v => (v.plays||0) > 0).sort((a,b) => (b.plays-a.plays) || (b.seconds-a.seconds)).slice(0, 12);
+  h += `<div class="s-h2">🔁 Am häufigsten angesehen</div>
+        <div class="s-sub">Diese Videos ziehst du immer wieder heran — meist ein Zeichen, dass der Inhalt noch nicht sitzt.</div>`;
+  if (topVids.length) {
+    h += `<div class="card"><table class="tbl"><thead><tr><th>Video</th><th>Thema</th><th class="num">Mal</th><th class="num">Zeit</th><th class="num">Zuletzt</th></tr></thead><tbody>`;
+    topVids.forEach(v => {
+      const t = topicOf(v);
+      h += `<tr class="clickable" onclick="playVideo('${v.id}')">
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.hard?'⚡ ':''}${esc(v.title)}</td>
+        <td style="color:var(--text-muted)">${t?`<span class="tdot" style="background:${t.color}"></span>${esc(t.name)}`:'—'}</td>
+        <td class="num">${v.plays}</td>
+        <td class="num" style="font-weight:500">${fmtMin(v.seconds)}</td>
+        <td class="num" style="font-weight:500;color:var(--text-muted)">${agoText(v.lastSeenAt)}</td>
+      </tr>`;
+    });
+    h += `</tbody></table></div>`;
+  } else h += `<div class="card"><div class="empty-state" style="padding:20px">Noch keine Wiedergabe erfasst.</div></div>`;
+
+  /* --- Zeit pro Thema --- */
+  const byTime = ts.filter(x => x.sec > 0).sort((a,b) => b.sec - a.sec);
+  h += `<div class="s-h2">⏱ Zeit pro Thema</div>`;
+  if (byTime.length) {
+    const max = byTime[0].sec;
+    h += `<div class="card">`;
+    byTime.forEach(x => {
+      h += `<div class="bar-row">
+        <div>
+          <div class="bar-label"><span class="tdot" style="background:${x.t.color}"></span>${esc(x.t.name)}
+            <span style="color:var(--text-muted);font-weight:400"> · ${x.plays} Wiedergaben</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round(x.sec/max*100)}%;background:${x.t.color}"></div></div>
+        </div>
+        <div class="bar-val">${fmtMin(x.sec)}</div>
+      </div>`;
+    });
+    h += `</div>`;
+  } else h += `<div class="card"><div class="empty-state" style="padding:20px">Noch keine Zeit erfasst.</div></div>`;
+
+  /* --- Heatmap --- */
+  h += `<div class="s-h2">📅 Aktivität der letzten 26 Wochen</div>
+        <div class="s-sub">Jede Zelle ist ein Tag; je dunkler, desto länger hast du geschaut. Längste Serie: <b>${st.best} Tage</b>.</div>
+        <div class="card"><div class="heat">`;
+  const start = new Date(); start.setHours(0,0,0,0);
+  start.setDate(start.getDate() - 181);
+  while (start.getDay() !== 1) start.setDate(start.getDate() - 1);   // auf Montag zurück
+  const cur = new Date(start), end = new Date();
+  while (cur <= end) {
+    h += `<div class="heat-col">`;
+    for (let d = 0; d < 7; d++) {
+      if (cur > end) { h += `<div class="heat-cell" style="background:transparent"></div>`; }
+      else {
+        const k = todayKey(cur), s = daily[k] || 0;
+        h += `<div class="heat-cell" style="background:${heatColor(s)}" title="${k}: ${s?fmtMin(s):'nichts'}"></div>`;
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    h += `</div>`;
+  }
+  h += `</div><div class="heat-legend">weniger
+        <div class="heat-cell" style="background:var(--bg-input)"></div>
+        <div class="heat-cell" style="background:#ddd6fe"></div>
+        <div class="heat-cell" style="background:#c4b5fd"></div>
+        <div class="heat-cell" style="background:#a78bfa"></div>
+        <div class="heat-cell" style="background:#8b5cf6"></div>
+        <div class="heat-cell" style="background:#6b3fa0"></div> mehr</div></div>`;
+
+  /* --- Vernachlässigt --- */
+  const neglect = ts.filter(x => x.count > 0)
+    .map(x => ({ ...x, d: x.last === null ? 9999 : daysSince(x.last) }))
+    .filter(x => x.d >= 10)
+    .sort((a,b) => b.d - a.d).slice(0, 10);
+  h += `<div class="s-h2">🕸 Zu lange nicht angerührt</div>
+        <div class="s-sub">Themen, die du seit mindestens 10 Tagen nicht mehr angeschaut hast — Kandidaten für die nächste Wiederholung.</div>`;
+  if (neglect.length) {
+    h += `<div class="card"><table class="tbl"><thead><tr><th>Thema</th><th class="num">Videos</th><th class="num">gesehen</th><th class="num">zuletzt</th></tr></thead><tbody>`;
+    neglect.forEach(x => {
+      h += `<tr class="clickable" onclick="jumpToTopic('${x.t.id}')">
+        <td><span class="tdot" style="background:${x.t.color}"></span>${esc(x.t.name)}</td>
+        <td class="num">${x.count}</td>
+        <td class="num">${x.watched}</td>
+        <td class="num" style="color:${x.d>60?'var(--red)':'var(--text-dim)'}">${x.last ? agoText(x.last) : 'nie'}</td>
+      </tr>`;
+    });
+    h += `</tbody></table></div>`;
+  } else h += `<div class="card"><div class="empty-state" style="padding:20px">Alles frisch — kein Thema liegt länger als 10 Tage brach.</div></div>`;
+
+  /* --- Fortschritt pro Thema --- */
+  h += `<div class="s-h2">✅ Fortschritt pro Thema</div><div class="card">`;
+  ts.filter(x => x.count > 0).forEach(x => {
+    const pct = Math.round(x.watched / x.count * 100);
+    h += `<div class="bar-row">
+      <div>
+        <div class="bar-label"><span class="tdot" style="background:${x.t.color}"></span>${esc(x.t.name)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${x.t.color}"></div></div>
+      </div>
+      <div class="bar-val">${x.watched}/${x.count}</div>
+    </div>`;
+  });
+  h += `</div>`;
+
+  h += `<div style="margin-top:34px;padding-top:18px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);line-height:1.7">
+    Diese Bibliothek ist bewusst <b>handverlesen</b> — kein Algorithmus entscheidet, was hier landet, sondern du.
+    Vertiefe die stärksten Schwachstellen anschließend im
+    <a href="https://sprintdeutsch.vercel.app/" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">SprintDeutsch-Grammatiktrainer</a> und
+    sichere die neuen Wörter im <a href="https://karteikasten-vercel.vercel.app/" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Karteikasten</a>.
+  </div>`;
+
+  el.innerHTML = h;
+}
+
+function jumpToTopic(id) {
+  setView('player');
+  openTopics[id] = true; saveData(); renderSidebar();
+  const node = document.querySelector(`.topic-section[data-topic="${id}"]`);
+  if (node) node.scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+/* =====================================================================
+   TASTATUR
+   ===================================================================== */
+document.addEventListener('keydown', e => {
+  const typing = ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);
+  if (e.key === 'Escape') { closeTopicModal(); closeVideoModal(); closeDataModal(); hideCtx(); autoplayCancel(); if (typing) e.target.blur(); return; }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+
+  if (e.key === '/') { e.preventDefault(); document.getElementById('searchInput').focus(); return; }
+  if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openVideoModal(); return; }
+  if (e.key === 't' || e.key === 'T') { e.preventDefault(); openTopicModal(); return; }
+  if (e.key === 's' || e.key === 'S') { e.preventDefault(); setView(currentView === 'stats' ? 'player' : 'stats'); return; }
+  if (e.key === 'b' || e.key === 'B') { if (activeVideoId) { e.preventDefault(); toggleBookmark(activeVideoId); } return; }
+  if (e.key === 'h' || e.key === 'H') { if (activeVideoId) { e.preventDefault(); toggleHard(activeVideoId); } return; }
+  if (e.key === 'j' || e.key === 'J') { const n = getNextVideo(activeVideoId); if (n) { e.preventDefault(); playVideo(n.id); } return; }
+  if (e.key === 'k' || e.key === 'K') { const p = getPrevVideo(activeVideoId); if (p) { e.preventDefault(); playVideo(p.id); } return; }
+});
+
+window.addEventListener('beforeunload', flushSession);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushSession(); });
+
+/* =====================================================================
+   INIT
+   ===================================================================== */
+function init() {
+  loadData();
+  topics.forEach(t => { if (openTopics[t.id] === undefined) openTopics[t.id] = true; });
+  saveData(true);           // Zustand sofort festschreiben — auch beim allerersten Start
+  renderSidebar();
+  updateStats();
+
+  // Deep-Link ?v=VIDEOID
+  const q = new URLSearchParams(location.search).get('v');
+  if (q) { const v = videos.find(x => x.videoId === q); if (v) setTimeout(() => playVideo(v.id), 120); }
+
+  // Hinweis auf file:// — YouTube-Embeds brauchen http(s)
+  if (location.protocol === 'file:') {
+    const b = document.createElement('div');
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;background:#6b3fa0;color:#fff;padding:9px 18px;font-size:12.5px;font-weight:500;text-align:center;';
+    b.innerHTML = 'YouTube-Videos laufen nicht über <b>file://</b> — nutze die Vercel-URL oder einen lokalen Server. <button onclick="this.parentElement.remove()" style="background:rgba(255,255,255,.22);border:none;color:#fff;padding:3px 9px;border-radius:5px;cursor:pointer;margin-left:10px;">OK</button>';
+    document.body.appendChild(b);
+  }
+
+  // Erinnerung an Sicherung (alle 21 Tage)
+  const le = ui.lastExport ? daysSince(ui.lastExport) : null;
+  if (videos.length > 4 && (le === null || le > 21)) {
+    setTimeout(() => showToast('Tipp: lade unter „Daten“ eine Sicherung herunter.'), 3000);
+  }
+
+  setTimeout(backfillTitles, 1200);
+}
+
+init();
+</script>
+</body>
+</html>
