@@ -29,8 +29,17 @@ Teil des Lern-Ökosystems zusammen mit
   Mitschrift lässt sich kopieren oder als `.txt` sichern.
   Nur `https://`-Streams — unverschlüsselte werden vom Browser blockiert.
 
+**Geräte-Abgleich**
+- Anmeldung per Magic Link (Supabase, kostenlos) — kein Passwort
+- Laptop und Handy teilen dieselbe Bibliothek; Abgleich beim Start, nach jeder Änderung,
+  minütlich und beim Zurückkehren zur App
+- Zusammenführen statt Überschreiben: Inhalte vereinigt, Zähler **pro Gerät** geführt und
+  addiert (bläht sich beim wiederholten Abgleich nicht auf), Löschungen wandern mit
+- Funktioniert offline weiter und gleicht ab, sobald wieder Netz da ist
+- Einrichtung: siehe `SYNC.md` (einmalig, ~3 Minuten)
+
 **Gedächtnis**
-- Alles liegt in `localStorage` (Schlüssel `deutschtube_v2`, Schema v3) — überlebt Neuladen und Neustart
+- Alles liegt in `localStorage` (Schlüssel `deutschtube_v2`, Schema v4) — überlebt Neuladen und Neustart
 - Automatische Migration aus der alten Einzeldatei-Version und aus `radiode_stations` der RadioDE-App
 - JSON-Export / -Import zum Sichern und Umziehen auf andere Geräte
   (Import wahlweise *zusammenführen* oder *ersetzen*; vorher wird automatisch eine

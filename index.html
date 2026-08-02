@@ -392,6 +392,15 @@
   .tr-status { display:flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--text-muted); }
   .tr-status .dot { width:7px; height:7px; border-radius:50%; background:var(--text-muted); }
   .tr-status.on { color:var(--green); } .tr-status.on .dot { background:var(--green); animation:pulse 1.5s infinite; }
+  .sync-chip {
+    display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700;
+    padding:5px 10px; border-radius:20px; background:var(--bg-input); cursor:pointer;
+    white-space:nowrap; transition:background .15s;
+  }
+  .sync-chip:hover { background:var(--bg-active); }
+  .sync-box { background:var(--bg-soft); border:1px solid var(--border); border-radius:11px; padding:15px 16px; }
+  .sync-row { font-size:13.5px; }
+
   .tr-select { width:auto; padding:5px 8px; font-size:11.5px; font-weight:600; background:var(--bg); }
 
   /* Startknopf oben — deutlich größer als die Nebenaktionen */
@@ -466,6 +475,8 @@
     .mobile-menu svg { width:18px; height:18px; }
     .mobile-menu:active { background:var(--bg-active); }
     .toolbar-actions { margin-left:auto; gap:6px; }
+    .sync-chip { padding:5px 8px; }
+    .sync-chip .sync-label { display:none; }   /* auf dem Handy reicht das Symbol */
     .toolbar-actions .btn { padding:7px 10px; font-size:12px; }
 
     .tabs { order:3; width:100%; }
@@ -586,6 +597,7 @@
         </div>
       </div>
       <div class="toolbar-actions">
+        <span class="sync-chip" id="syncChip" style="display:none;" onclick="openDataModal()"></span>
         <button class="btn btn-ghost btn-sm" onclick="openDataModal()" title="Sichern / Wiederherstellen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Daten
@@ -786,8 +798,10 @@ https://youtu.be/def45678901 | Eigener Titel hier"></textarea>
 <!-- ========== DATA MODAL ========== -->
 <div class="modal-overlay" id="dataModal" onclick="closeDataModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
-    <h2>Daten sichern &amp; übertragen</h2>
-    <p class="modal-desc">Deine Bibliothek liegt im Speicher dieses Browsers. Mit der Sicherungsdatei nimmst du sie auf jedes andere Gerät mit.</p>
+    <h2>Geräte &amp; Daten</h2>
+    <p class="modal-desc">Melde dich an, damit Laptop und Handy dieselbe Bibliothek teilen. Ohne Anmeldung bleibt alles nur auf diesem Gerät.</p>
+    <div class="sync-box" id="syncBox"></div>
+    <h3 style="font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin:22px 0 10px;">Sicherungsdatei</h3>
     <div id="dataSummary" style="background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;padding:13px 15px;font-size:12.5px;line-height:1.8;margin-bottom:16px;"></div>
     <div class="modal-actions" style="justify-content:flex-start;">
       <button class="btn btn-primary" onclick="exportData()">⬇ Sicherung herunterladen</button>
@@ -850,7 +864,57 @@ https://youtu.be/def45678901 | Eigener Titel hier"></textarea>
 
 const LS_KEY   = 'deutschtube_v2';
 const LS_BAK   = 'deutschtube_v2_autobackup';
-const SCHEMA   = 3;
+const SCHEMA   = 4;
+
+/* Jedes Gerät zählt für sich. Beim Zusammenführen wird pro Gerät das Maximum genommen
+   und dann summiert — sonst würden Zähler beim Hin- und Hersynchronisieren explodieren
+   (Addieren) oder Zeit verschlucken (einfaches Überschreiben). */
+const DEVICE_ID = (() => {
+  let d = null;
+  try { d = localStorage.getItem('deutschtube_device'); } catch {}
+  if (!d) { d = 'dev_' + Math.random().toString(36).slice(2, 10); try { localStorage.setItem('deutschtube_device', d); } catch {} }
+  return d;
+})();
+
+function ctrCell(o) {
+  if (!o.c || typeof o.c !== 'object') o.c = {};
+  if (!o.c[DEVICE_ID]) o.c[DEVICE_ID] = { p:0, s:0 };
+  return o.c[DEVICE_ID];
+}
+function ctrTotals(o) {                     // Summen für die Anzeige aktuell halten
+  let p = 0, s = 0;
+  for (const k in (o.c || {})) { p += o.c[k].p || 0; s += o.c[k].s || 0; }
+  o.plays = p; o.seconds = s;
+}
+function ctrAdd(o, key, n) { ctrCell(o)[key] = (ctrCell(o)[key] || 0) + n; ctrTotals(o); }
+function ctrReset(o) { o.c = {}; o.plays = 0; o.seconds = 0; }
+function ctrMerge(a, b) {
+  const out = {};
+  for (const k in (a || {})) out[k] = { p:(a[k].p||0), s:(a[k].s||0) };
+  for (const k in (b || {})) {
+    const x = out[k] || { p:0, s:0 };
+    out[k] = { p: Math.max(x.p, b[k].p || 0), s: Math.max(x.s, b[k].s || 0) };
+  }
+  return out;
+}
+function dailyAdd(k, n) {
+  if (!dailyC[k]) dailyC[k] = {};
+  dailyC[k][DEVICE_ID] = (dailyC[k][DEVICE_ID] || 0) + n;
+  daily[k] = Object.values(dailyC[k]).reduce((a, b) => a + b, 0);
+}
+function dailyRebuild() {
+  daily = {};
+  for (const k in dailyC) daily[k] = Object.values(dailyC[k]).reduce((a, b) => a + b, 0);
+}
+function dailyMerge(a, b) {
+  const out = {};
+  for (const k in (a || {})) out[k] = { ...a[k] };
+  for (const k in (b || {})) {
+    out[k] = out[k] || {};
+    for (const d in b[k]) out[k][d] = Math.max(out[k][d] || 0, b[k][d] || 0);
+  }
+  return out;
+}
 
 const TOPIC_COLORS = ['#f97316','#3b82f6','#8b5cf6','#22c55e','#ec4899','#eab308','#06b6d4','#f43f5e','#14b8a6','#a855f7'];
 const STATUS_ORDER  = ['to-watch','in-progress','watched'];
@@ -878,7 +942,7 @@ const DEFAULT_STATIONS = [
 ];
 
 /* ---------- state ---------- */
-let topics = [], videos = [], stations = [], daily = {}, openTopics = {}, ui = {};
+let topics = [], videos = [], stations = [], daily = {}, dailyC = {}, openTopics = {}, ui = {};
 let activeVideoId = null, editingTopicId = null, editingVideoId = null;
 let ctxTopicId = null, ctxVideoId = null;
 let searchQ = '', filters = new Set();
@@ -888,25 +952,30 @@ let currentView = 'player', videoTab = 'single', loopOn = false;
    STORAGE
    ===================================================================== */
 function blankState() {
-  return { version:SCHEMA, topics:[...DEFAULT_TOPICS], videos:[], stations:DEFAULT_STATIONS.map(s=>({...s})), daily:{}, openTopics:{}, ui:{} };
+  return { version:SCHEMA, topics:[...DEFAULT_TOPICS], videos:[], stations:DEFAULT_STATIONS.map(s=>({...s})), dailyC:{}, openTopics:{}, ui:{} };
 }
 
 function normaliseStation(s) {
-  return {
+  const o = {
     id: s.id || ('st_' + Math.random().toString(36).slice(2,10)),
     name: s.name || 'Sender',
     url: s.url,
     desc: s.desc || '',
     color: s.color || TOPIC_COLORS[0],
     type: s.type === 'hls' ? 'hls' : 'audio',
-    seconds: Number(s.seconds) || 0,
-    plays: Number(s.plays) || 0,
+    c: (s.c && typeof s.c === 'object' && Object.keys(s.c).length) ? s.c : null,
+    seconds: 0, plays: 0,
     lastPlayedAt: s.lastPlayedAt || null,
+    updatedAt: s.updatedAt || new Date().toISOString(),
   };
+  if (!o.c) o.c = (Number(s.plays) || Number(s.seconds))
+    ? { [DEVICE_ID]: { p: Number(s.plays) || 0, s: Number(s.seconds) || 0 } } : {};
+  ctrTotals(o);
+  return o;
 }
 
 function normaliseVideo(v) {
-  return {
+  const o = {
     id: v.id || ('vid_' + Math.random().toString(36).slice(2,10)),
     videoId: v.videoId,
     title: v.title || ('Video ' + v.videoId),
@@ -915,11 +984,17 @@ function normaliseVideo(v) {
     notes: v.notes || '',
     bookmarked: !!v.bookmarked,
     hard: !!v.hard,
-    plays: Number(v.plays) || 0,
-    seconds: Number(v.seconds) || 0,
+    c: (v.c && typeof v.c === 'object' && Object.keys(v.c).length) ? v.c : null,
+    plays: 0, seconds: 0,
     lastSeenAt: v.lastSeenAt || null,
     addedAt: v.addedAt || new Date().toISOString(),
+    updatedAt: v.updatedAt || v.addedAt || new Date().toISOString(),
   };
+  // v3 → v4: flache Zähler diesem Gerät zuschreiben
+  if (!o.c) o.c = (Number(v.plays) || Number(v.seconds))
+    ? { [DEVICE_ID]: { p: Number(v.plays) || 0, s: Number(v.seconds) || 0 } } : {};
+  ctrTotals(o);
+  return o;
 }
 
 function loadData() {
@@ -949,7 +1024,10 @@ function loadData() {
   let st = savedStations;
   if (!st) { try { st = JSON.parse(localStorage.getItem('radiode_stations') || 'null'); } catch {} }
   stations   = (st && st.length ? st : DEFAULT_STATIONS).filter(x => x && x.url).map(normaliseStation);
-  daily      = s.daily || {};
+  // v3 → v4: flache Tageswerte diesem Gerät zuschreiben
+  if (s.dailyC) dailyC = s.dailyC;
+  else { dailyC = {}; for (const k in (s.daily || {})) dailyC[k] = { [DEVICE_ID]: s.daily[k] }; }
+  dailyRebuild();
   openTopics = s.openTopics || {};
   ui         = s.ui || {};
   loopOn     = !!ui.loop;
@@ -958,16 +1036,17 @@ function loadData() {
 let saveTimer = null;
 function saveData(now) {
   const write = () => {
-    const payload = { version:SCHEMA, topics, videos, stations, daily, openTopics, ui, savedAt:new Date().toISOString() };
+    const payload = { version:SCHEMA, topics, videos, stations, dailyC, openTopics, ui, savedAt:new Date().toISOString() };
     try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); }
     catch (e) { showToast('Speicher voll — bitte eine Sicherung herunterladen.'); }
+    scheduleSync();
   };
   clearTimeout(saveTimer);
   if (now) write(); else saveTimer = setTimeout(write, 250);
 }
 
 function stateBlob() {
-  return { app:'DeutschTube', version:SCHEMA, exportedAt:new Date().toISOString(), topics, videos, stations, daily, openTopics, ui };
+  return { app:'DeutschTube', version:SCHEMA, exportedAt:new Date().toISOString(), topics, videos, stations, dailyC, openTopics, ui };
 }
 
 /* =====================================================================
@@ -1260,12 +1339,12 @@ function startTicking() {
     if (state !== 1) return;                       // 1 = PLAYING
     const v = videos.find(x => x.id === activeVideoId);
     if (!v) return;
-    v.seconds = (v.seconds || 0) + 1;
+    ctrAdd(v, 's', 1);
     sessionSec++;
-    daily[todayKey()] = (daily[todayKey()] || 0) + 1;
+    dailyAdd(todayKey(), 1);
     if (!sessionCounted && sessionSec >= MIN_PLAY_SEC) {
       sessionCounted = true;
-      v.plays = (v.plays || 0) + 1;
+      ctrAdd(v, 'p', 1);
       v.lastSeenAt = new Date().toISOString();
       if (v.status === 'to-watch') v.status = 'in-progress';
       renderSidebar(); refreshInfoBar();
@@ -1517,12 +1596,12 @@ function startRadioTicking() {
     if (!currentStation || audio.paused || audio.readyState < 2) return;
     radioSessionSec++;
     if (radioSessionSec === 1) {   // erster Sekundentakt mit echtem Ton = eingeschaltet
-      currentStation.plays = (currentStation.plays || 0) + 1;
+      ctrAdd(currentStation, 'p', 1);
       currentStation.lastPlayedAt = new Date().toISOString();
       renderStations();
     }
-    currentStation.seconds = (currentStation.seconds || 0) + 1;
-    daily[todayKey()] = (daily[todayKey()] || 0) + 1;
+    ctrAdd(currentStation, 's', 1);
+    dailyAdd(todayKey(), 1);
     if (radioSessionSec % 15 === 0) { saveData(); updateStats(); }
   }, 1000);
 }
@@ -1580,7 +1659,7 @@ function saveStation() {
 
   if (editingStationId) {
     const s = stations.find(x => x.id === editingStationId);
-    if (s) { Object.assign(s, { name, url, desc, color, type }); if (currentStation && currentStation.id === s.id) updateRadioBar(); }
+    if (s) { Object.assign(s, { name, url, desc, color, type, updatedAt:new Date().toISOString() }); if (currentStation && currentStation.id === s.id) updateRadioBar(); }
   } else {
     stations.push(normaliseStation({ id:'st_' + Date.now(), name, url, desc, color, type }));
   }
@@ -1591,6 +1670,7 @@ function deleteStation(id) {
   const s = stations.find(x => x.id === id); if (!s) return;
   if (!confirm(`Sender „${s.name}“ löschen?` + (s.seconds > 60 ? `\nDie erfasste Hörzeit (${fmtMin(s.seconds)}) geht mit verloren.` : ''))) return;
   if (currentStation && currentStation.id === id) stopRadio();
+  tombstone('s:' + s.url);
   stations = stations.filter(x => x.id !== id);
   saveData(true); renderStations(); showToast('Sender entfernt.');
 }
@@ -2234,13 +2314,13 @@ function markTopicWatched(id) {
 }
 function moveVideoTo(vid, tid) {
   const v = videos.find(x => x.id === vid); if (!v) return;
-  v.topicId = tid; openTopics[tid] = true;
+  v.topicId = tid; v.updatedAt = new Date().toISOString(); openTopics[tid] = true;
   saveData(); renderSidebar(); if (vid === activeVideoId) refreshInfoBar();
   showToast('Verschoben nach „' + (topics.find(t=>t.id===tid)||{}).name + '“.');
 }
 function resetVideoStats(id) {
   const v = videos.find(x => x.id === id); if (!v) return;
-  v.plays = 0; v.seconds = 0; v.lastSeenAt = null; v.status = 'to-watch';
+  ctrReset(v); v.lastSeenAt = null; v.status = 'to-watch'; v.updatedAt = new Date().toISOString();
   saveData(); renderSidebar(); updateStats(); showToast('Zähler zurückgesetzt.');
 }
 
@@ -2278,7 +2358,7 @@ function saveTopic() {
   const color = (document.querySelector('#topicColors .color-opt.selected') || {}).dataset?.color || TOPIC_COLORS[0];
   if (editingTopicId) {
     const t = topics.find(x => x.id === editingTopicId);
-    if (t) { t.name = name; t.color = color; t.note = note; }
+    if (t) { t.name = name; t.color = color; t.note = note; t.updatedAt = new Date().toISOString(); }
   } else {
     const id = 'topic_' + Date.now();
     topics.push({ id, name, color, note });
@@ -2292,7 +2372,8 @@ function deleteTopic(id) {
   const t = topics.find(x => x.id === id); if (!t) return;
   const n = videosOfTopic(id).length;
   if (!confirm(`Thema „${t.name}“ löschen?` + (n ? `\n${n} Video(s) wandern nach „Ohne Thema“ — sie bleiben erhalten.` : ''))) return;
-  videos.forEach(v => { if (v.topicId === id) v.topicId = ''; });
+  videos.forEach(v => { if (v.topicId === id) { v.topicId = ''; v.updatedAt = new Date().toISOString(); } });
+  tombstone('t:' + id);
   topics = topics.filter(x => x.id !== id);
   delete openTopics[id];
   saveData(true); renderSidebar(); updateStats(); showToast('Thema gelöscht.');
@@ -2385,7 +2466,7 @@ async function saveVideo() {
 
   if (editingVideoId) {
     const v = videos.find(x => x.id === editingVideoId);
-    if (v) { v.videoId = vid; v.title = title; v.topicId = topicId; }
+    if (v) { v.videoId = vid; v.title = title; v.topicId = topicId; v.updatedAt = new Date().toISOString(); }
   } else {
     videos.push(normaliseVideo({ videoId:vid, title, topicId }));
   }
@@ -2399,6 +2480,7 @@ function confirmDeleteVideo(id) {
   hideCtx();
   const v = videos.find(x => x.id === id); if (!v) return;
   if (!confirm(`„${v.title || 'Video'}“ wirklich löschen?\nDie Statistik dazu geht mit verloren.`)) return;
+  tombstone('v:' + v.videoId);
   videos = videos.filter(x => x.id !== id);
   if (activeVideoId === id) {
     activeVideoId = null;
@@ -2421,6 +2503,7 @@ function openDataModal() {
     <b>${topics.length}</b> Themen · <b>${videos.length}</b> Videos · <b>${stations.length}</b> Sender<br>
     <b>${plays}</b> Wiedergaben · <b>${fmtMin(sec)}</b> Video · <b>${fmtMin(rsec)}</b> Radio<br>
     <b>${Object.keys(daily).length}</b> aktive Tage aufgezeichnet`;
+  renderAccount();
   document.getElementById('dataModal').classList.add('show');
 }
 function closeDataModal(e) {
@@ -2455,30 +2538,10 @@ function importData(ev) {
       topics = (d.topics||[]).map(t => ({ id:t.id, name:t.name, color:t.color||TOPIC_COLORS[0], note:t.note||'' }));
       videos = d.videos.map(normaliseVideo);
       stations = (d.stations && d.stations.length ? d.stations : DEFAULT_STATIONS).filter(x=>x&&x.url).map(normaliseStation);
-      daily = d.daily || {}; openTopics = d.openTopics || {}; ui = d.ui || {};
+      dailyC = d.dailyC || {}; if (!d.dailyC && d.daily) { dailyC = {}; for (const k in d.daily) dailyC[k] = { [DEVICE_ID]: d.daily[k] }; }
+      dailyRebuild(); openTopics = d.openTopics || {}; ui = d.ui || {};
     } else {
-      (d.topics||[]).forEach(t => { if (!topics.find(x => x.id === t.id || x.name === t.name)) topics.push({ id:t.id, name:t.name, color:t.color||TOPIC_COLORS[0], note:t.note||'' }); });
-      d.videos.forEach(raw => {
-        const nv = normaliseVideo(raw);
-        const cur = videos.find(v => v.videoId === nv.videoId);
-        if (!cur) { videos.push(nv); return; }
-        cur.plays   = (cur.plays||0) + (nv.plays||0);
-        cur.seconds = (cur.seconds||0) + (nv.seconds||0);
-        cur.hard    = cur.hard || nv.hard;
-        cur.bookmarked = cur.bookmarked || nv.bookmarked;
-        if (nv.notes && !cur.notes) cur.notes = nv.notes;
-        if (STATUS_ORDER.indexOf(nv.status) > STATUS_ORDER.indexOf(cur.status)) cur.status = nv.status;
-        if (nv.lastSeenAt && (!cur.lastSeenAt || nv.lastSeenAt > cur.lastSeenAt)) cur.lastSeenAt = nv.lastSeenAt;
-      });
-      (d.stations || []).forEach(raw => {
-        const ns = normaliseStation(raw);
-        const cur = stations.find(x => x.url === ns.url || x.id === ns.id);
-        if (!cur) { stations.push(ns); return; }
-        cur.seconds = (cur.seconds||0) + (ns.seconds||0);
-        cur.plays   = (cur.plays||0) + (ns.plays||0);
-        if (ns.lastPlayedAt && (!cur.lastPlayedAt || ns.lastPlayedAt > cur.lastPlayedAt)) cur.lastPlayedAt = ns.lastPlayedAt;
-      });
-      Object.entries(d.daily || {}).forEach(([k, s]) => { daily[k] = Math.max(daily[k] || 0, s); });
+      mergeState(d);
     }
     saveData(true); renderSidebar(); renderStations(); updateStats(); if (currentView === 'stats') renderStats();
     closeDataModal();
@@ -2492,10 +2555,248 @@ function resetAll() {
   localStorage.setItem(LS_BAK, JSON.stringify(stateBlob()));
   stopRadio();
   const s = blankState();
-  topics = s.topics; videos = []; stations = s.stations.map(normaliseStation); daily = {}; openTopics = {}; ui = {};
+  topics = s.topics; videos = []; stations = s.stations.map(normaliseStation); dailyC = {}; daily = {}; openTopics = {}; ui = {};
   activeVideoId = null;
   saveData(true); renderSidebar(); renderStations(); updateStats(); closeDataModal();
   showToast('Zurückgesetzt. (Eine Rücksetz-Kopie liegt im Browser.)');
+}
+
+/* =====================================================================
+   GERÄTE-SYNCHRONISATION (Supabase, Anmeldung per Magic Link)
+   Der öffentliche „anon key“ ist zum Einbetten gedacht und durch
+   Row Level Security geschützt — er ist kein Geheimnis.
+   ===================================================================== */
+const SUPABASE_URL_BUILTIN  = '';   // <— hier trage ich deine Projekt-URL ein
+const SUPABASE_ANON_BUILTIN = '';   // <— hier den öffentlichen anon key
+
+let sb = null, sbUser = null, syncTimer = null, syncPullTimer = null;
+let syncState = 'off';   // off | ready | syncing | error
+let syncLastAt = null, syncLastErr = '';
+
+function syncCfg() {
+  let c = {};
+  try { c = JSON.parse(localStorage.getItem('deutschtube_sync') || '{}'); } catch {}
+  return { url: (c.url || SUPABASE_URL_BUILTIN || '').trim().replace(/\/+$/,''), key: (c.key || SUPABASE_ANON_BUILTIN || '').trim() };
+}
+function syncConfigured() { const c = syncCfg(); return !!(c.url && c.key); }
+
+function setSyncState(st, err) {
+  syncState = st; syncLastErr = err || '';
+  const chip = document.getElementById('syncChip');
+  if (!chip) return;
+  const map = {
+    off:     ['○', 'Nicht angemeldet', 'var(--text-muted)'],
+    ready:   ['●', sbUser ? 'Synchronisiert' : 'Bereit', 'var(--green)'],
+    syncing: ['◐', 'Gleicht ab…', 'var(--blue)'],
+    error:   ['▲', 'Sync-Fehler', 'var(--red)'],
+  };
+  const [icon, label, col] = map[st] || map.off;
+  chip.style.display = syncConfigured() ? 'inline-flex' : 'none';
+  chip.style.color = col;
+  chip.title = err || (syncLastAt ? 'Zuletzt abgeglichen: ' + new Date(syncLastAt).toLocaleTimeString('de-DE') : label);
+  chip.innerHTML = `<span style="font-size:13px;line-height:1">${icon}</span><span class="sync-label">${label}</span>`;
+}
+
+async function initSync() {
+  if (!syncConfigured()) { setSyncState('off'); return; }
+  try {
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const c = syncCfg();
+    sb = createClient(c.url, c.key, { auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } });
+    const { data } = await sb.auth.getSession();
+    sbUser = data && data.session ? data.session.user : null;
+    sb.auth.onAuthStateChange(async (_e, session) => {
+      const was = sbUser && sbUser.id;
+      sbUser = session ? session.user : null;
+      renderAccount();
+      if (sbUser && sbUser.id !== was) { showToast('Angemeldet als ' + sbUser.email); await syncNow(true); }
+      if (!sbUser) setSyncState('off');
+    });
+    renderAccount();
+    if (sbUser) { await syncNow(true); startSyncLoops(); }
+    else setSyncState('off');
+    // Magic-Link-Fragment aus der Adresszeile putzen
+    if (location.hash.includes('access_token') || location.search.includes('code=')) history.replaceState(null, '', location.pathname);
+  } catch (e) {
+    console.error('Sync init:', e);
+    setSyncState('error', 'Verbindung zum Sync-Dienst fehlgeschlagen.');
+  }
+}
+
+function startSyncLoops() {
+  clearInterval(syncPullTimer);
+  syncPullTimer = setInterval(() => { if (sbUser && !document.hidden) syncNow(false); }, 60000);
+}
+
+/* Nach jeder Änderung: gebündelt hochladen */
+function scheduleSync() {
+  if (!sbUser) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncNow(false), 4000);
+}
+
+let syncBusy = false;
+async function syncNow(loud) {
+  if (!sb || !sbUser || syncBusy) return;
+  syncBusy = true; setSyncState('syncing');
+  try {
+    const { data, error } = await sb.from('dt_state').select('data').eq('user_id', sbUser.id).maybeSingle();
+    if (error) throw error;
+
+    let added = 0;
+    if (data && data.data) added = mergeState(data.data);
+
+    const payload = stateBlob();
+    const up = await sb.from('dt_state').upsert(
+      { user_id: sbUser.id, data: payload, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+    if (up.error) throw up.error;
+
+    saveData(true); renderSidebar(); renderStations(); updateStats();
+    if (currentView === 'stats') renderStats();
+    syncLastAt = Date.now(); setSyncState('ready');
+    if (loud) showToast(added ? added + ' neue Einträge vom anderen Gerät geladen.' : 'Alles auf dem neuesten Stand.');
+    else if (added) showToast(added + ' neue Einträge übernommen.');
+  } catch (e) {
+    console.error('Sync:', e);
+    const msg = (e && e.message) || 'Unbekannter Fehler';
+    setSyncState('error', msg);
+    if (loud) showToast('Abgleich fehlgeschlagen: ' + msg);
+  } finally { syncBusy = false; }
+}
+
+async function signIn() {
+  const email = (document.getElementById('syncEmail').value || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { showToast('Bitte eine gültige E-Mail eingeben.'); return; }
+  if (!sb) { showToast('Sync ist noch nicht eingerichtet.'); return; }
+  const btn = document.getElementById('syncSignInBtn');
+  btn.disabled = true; btn.textContent = 'Wird gesendet…';
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+  btn.disabled = false; btn.textContent = 'Anmeldelink senden';
+  if (error) { showToast('Fehler: ' + error.message); return; }
+  document.getElementById('syncSent').style.display = '';
+  document.getElementById('syncSentMail').textContent = email;
+}
+
+async function signOut() {
+  if (!sb) return;
+  if (!confirm('Abmelden?\nDeine Bibliothek bleibt auf diesem Gerät erhalten.')) return;
+  await syncNow(false);
+  await sb.auth.signOut();
+  sbUser = null; renderAccount(); setSyncState('off');
+  showToast('Abgemeldet.');
+}
+
+function renderAccount() {
+  const box = document.getElementById('syncBox');
+  if (!box) return;
+  if (!syncConfigured()) {
+    box.innerHTML = `
+      <div class="sync-row"><b>Geräte-Abgleich ist noch nicht eingerichtet.</b></div>
+      <div class="form-hint" style="margin:6px 0 12px;">Einmalig ein kostenloses Supabase-Projekt anlegen (rund 2 Minuten) — die Anleitung steht in <code>SYNC.md</code> im Projektordner. Danach hier die beiden Werte eintragen.</div>
+      <div class="form-group"><label class="form-label">Projekt-URL</label><input class="form-input" id="cfgUrl" placeholder="https://xxxx.supabase.co"></div>
+      <div class="form-group"><label class="form-label">Anon Key (öffentlich)</label><input class="form-input" id="cfgKey" placeholder="eyJhbGciOi…"></div>
+      <button class="btn btn-primary" onclick="saveSyncCfg()">Speichern und verbinden</button>`;
+    return;
+  }
+  if (!sbUser) {
+    box.innerHTML = `
+      <div class="sync-row"><b>Anmelden für den Geräte-Abgleich</b></div>
+      <div class="form-hint" style="margin:6px 0 12px;">Du bekommst einen Link per E-Mail — kein Passwort nötig. Melde dich auf jedem Gerät mit derselben Adresse an.</div>
+      <div class="form-group"><label class="form-label">E-Mail</label>
+        <input class="form-input" id="syncEmail" type="email" placeholder="du@example.com" onkeydown="if(event.key==='Enter')signIn()"></div>
+      <button class="btn btn-primary" id="syncSignInBtn" onclick="signIn()">Anmeldelink senden</button>
+      <div id="syncSent" style="display:none;margin-top:12px;background:#dcfce7;border:1px solid #86efac;color:#15803d;border-radius:9px;padding:11px 13px;font-size:12.5px;line-height:1.6;">
+        Link an <b id="syncSentMail"></b> geschickt. Öffne ihn <b>auf diesem Gerät</b> — danach bist du angemeldet.
+      </div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="sync-row"><b>Angemeldet als ${esc(sbUser.email)}</b></div>
+    <div class="form-hint" style="margin:6px 0 12px;">
+      Änderungen werden automatisch abgeglichen — beim Start, nach jeder Änderung und einmal pro Minute.
+      ${syncLastAt ? 'Zuletzt: ' + new Date(syncLastAt).toLocaleTimeString('de-DE') : ''}
+      ${syncLastErr ? '<br><span style="color:var(--red)">Letzter Fehler: ' + esc(syncLastErr) + '</span>' : ''}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="syncNow(true)">⟳ Jetzt abgleichen</button>
+      <button class="btn" onclick="signOut()">Abmelden</button>
+    </div>`;
+}
+
+function saveSyncCfg() {
+  const url = (document.getElementById('cfgUrl').value || '').trim().replace(/\/+$/,'');
+  const key = (document.getElementById('cfgKey').value || '').trim();
+  if (!/^https:\/\/.+\.supabase\.co$/.test(url)) { showToast('Die Projekt-URL sieht nicht richtig aus.'); return; }
+  if (key.length < 40) { showToast('Der Anon Key sieht zu kurz aus.'); return; }
+  if (/^service_role/i.test(key) || key.includes('service_role')) { showToast('Das ist der geheime Service-Key — bitte den öffentlichen anon key nehmen.'); return; }
+  localStorage.setItem('deutschtube_sync', JSON.stringify({ url, key }));
+  showToast('Gespeichert — verbinde…');
+  initSync().then(renderAccount);
+}
+
+/* =====================================================================
+   ZUSAMMENFÜHREN — für Import und Gerätesynchronisation
+   Regel: Inhalte vereinigen, Zähler pro Gerät maximieren, beim Rest gewinnt
+   der jüngere Stand. So geht nichts verloren, egal wo etwas entstanden ist.
+   ===================================================================== */
+function mergeState(remote) {
+  const r = remote || {};
+  let added = 0;
+
+  (r.topics || []).forEach(t => {
+    const cur = topics.find(x => x.id === t.id) || topics.find(x => x.name === t.name);
+    if (!cur) { topics.push({ id:t.id, name:t.name, color:t.color || TOPIC_COLORS[0], note:t.note || '' }); added++; }
+    else if ((t.updatedAt || '') > (cur.updatedAt || '')) { cur.name = t.name; cur.color = t.color; cur.note = t.note || ''; cur.updatedAt = t.updatedAt; }
+  });
+
+  (r.videos || []).forEach(raw => {
+    if (!raw || !raw.videoId) return;
+    const nv = normaliseVideo(raw);
+    const cur = videos.find(v => v.videoId === nv.videoId);
+    if (!cur) { videos.push(nv); added++; return; }
+    cur.c = ctrMerge(cur.c, nv.c); ctrTotals(cur);
+    cur.bookmarked = cur.bookmarked || nv.bookmarked;
+    cur.hard = cur.hard || nv.hard;
+    if (nv.lastSeenAt && (!cur.lastSeenAt || nv.lastSeenAt > cur.lastSeenAt)) cur.lastSeenAt = nv.lastSeenAt;
+    if ((nv.updatedAt || '') > (cur.updatedAt || '')) {   // jüngere Bearbeitung gewinnt
+      cur.title = nv.title; cur.topicId = nv.topicId; cur.updatedAt = nv.updatedAt;
+      if (nv.notes) cur.notes = nv.notes;
+    } else if (nv.notes && !cur.notes) cur.notes = nv.notes;
+    if (STATUS_ORDER.indexOf(nv.status) > STATUS_ORDER.indexOf(cur.status)) cur.status = nv.status;
+  });
+
+  (r.stations || []).forEach(raw => {
+    if (!raw || !raw.url) return;
+    const ns = normaliseStation(raw);
+    const cur = stations.find(x => x.url === ns.url) || stations.find(x => x.id === ns.id);
+    if (!cur) { stations.push(ns); added++; return; }
+    cur.c = ctrMerge(cur.c, ns.c); ctrTotals(cur);
+    if (ns.lastPlayedAt && (!cur.lastPlayedAt || ns.lastPlayedAt > cur.lastPlayedAt)) cur.lastPlayedAt = ns.lastPlayedAt;
+    if ((ns.updatedAt || '') > (cur.updatedAt || '')) { cur.name = ns.name; cur.desc = ns.desc; cur.color = ns.color; cur.type = ns.type; cur.updatedAt = ns.updatedAt; }
+  });
+
+  // gelöschte Einträge respektieren (Grabsteine)
+  const tomb = { ...(ui.deleted || {}), ...((r.ui && r.ui.deleted) || {}) };
+  if (Object.keys(tomb).length) {
+    videos   = videos.filter(v => !tomb['v:' + v.videoId]);
+    stations = stations.filter(s => !tomb['s:' + s.url]);
+    topics   = topics.filter(t => !tomb['t:' + t.id]);
+    ui.deleted = tomb;
+  }
+
+  dailyC = dailyMerge(dailyC, r.dailyC || {});
+  dailyRebuild();
+  return added;
+}
+
+/* Löschungen müssen mitwandern, sonst kommt Gelöschtes beim nächsten Abgleich zurück. */
+function tombstone(key) {
+  ui.deleted = ui.deleted || {};
+  ui.deleted[key] = new Date().toISOString();
+  const keys = Object.keys(ui.deleted);
+  if (keys.length > 500) keys.sort((a,b)=> ui.deleted[a] < ui.deleted[b] ? -1 : 1).slice(0, keys.length-500).forEach(k => delete ui.deleted[k]);
 }
 
 /* =====================================================================
@@ -2764,7 +3065,11 @@ document.addEventListener('keydown', e => {
 });
 
 window.addEventListener('beforeunload', flushSession);
-document.addEventListener('visibilitychange', () => { if (document.hidden) flushSession(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) flushSession();
+  else if (sbUser) syncNow(false);          // beim Zurückkommen den anderen Geräte-Stand holen
+});
+window.addEventListener('online', () => { if (sbUser) syncNow(false); });
 
 /* =====================================================================
    INIT
@@ -2813,6 +3118,8 @@ function init() {
   }
 
   setTimeout(backfillTitles, 1200);
+  setSyncState('off');
+  initSync();
 }
 
 init();
