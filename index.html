@@ -1070,7 +1070,8 @@ function loadData() {
   if (!s) s = blankState();
 
   topics     = (s.topics && s.topics.length ? s.topics : [...DEFAULT_TOPICS])
-                 .map(t => ({ id:t.id, name:t.name, color:t.color || TOPIC_COLORS[0], note:t.note || '' }));
+                 .map(t => ({ id:t.id, name:t.name, color:t.color || TOPIC_COLORS[0], note:t.note || '',
+                              updatedAt: t.updatedAt || new Date(0).toISOString() }));
   videos     = (s.videos || []).filter(v => v && v.videoId).map(normaliseVideo);
   // v2 → v3: Radio kam später dazu. Reihenfolge: gespeicherte Sender → alte RadioDE-App → Standard.
   let st = savedStations;
@@ -1713,6 +1714,7 @@ function saveStation() {
     const s = stations.find(x => x.id === editingStationId);
     if (s) { Object.assign(s, { name, url, desc, color, type, updatedAt:new Date().toISOString() }); if (currentStation && currentStation.id === s.id) updateRadioBar(); }
   } else {
+    untombstone('s:' + url);
     stations.push(normaliseStation({ id:'st_' + Date.now(), name, url, desc, color, type }));
   }
   saveData(true); renderStations(); closeStationModal();
@@ -2413,7 +2415,8 @@ function saveTopic() {
     if (t) { t.name = name; t.color = color; t.note = note; t.updatedAt = new Date().toISOString(); }
   } else {
     const id = 'topic_' + Date.now();
-    topics.push({ id, name, color, note });
+    untombstone('t:' + id);
+    topics.push({ id, name, color, note, updatedAt:new Date().toISOString() });
     openTopics[id] = true;
   }
   saveData(true); renderSidebar(); updateStats(); closeTopicModal();
@@ -2484,6 +2487,7 @@ async function saveVideo() {
       const vid = extractVideoId(rawUrl);
       if (!vid) { bad++; continue; }
       if (videos.some(v => v.videoId === vid)) { dupes++; continue; }
+      untombstone('v:' + vid);
       const v = normaliseVideo({ videoId:vid, title: customTitle || '', topicId });
       videos.push(v); fresh.push(v); added++;
     }
@@ -2520,6 +2524,7 @@ async function saveVideo() {
     const v = videos.find(x => x.id === editingVideoId);
     if (v) { v.videoId = vid; v.title = title; v.topicId = topicId; v.updatedAt = new Date().toISOString(); }
   } else {
+    untombstone('v:' + vid);
     videos.push(normaliseVideo({ videoId:vid, title, topicId }));
   }
   if (topicId) { openTopics[topicId] = true; ui.lastTopic = topicId; }
@@ -2890,7 +2895,7 @@ function mergeState(remote) {
 
   (r.topics || []).forEach(t => {
     const cur = topics.find(x => x.id === t.id) || topics.find(x => x.name === t.name);
-    if (!cur) { topics.push({ id:t.id, name:t.name, color:t.color || TOPIC_COLORS[0], note:t.note || '' }); added++; }
+    if (!cur) { topics.push({ id:t.id, name:t.name, color:t.color || TOPIC_COLORS[0], note:t.note || '', updatedAt:t.updatedAt || new Date(0).toISOString() }); added++; }
     else if ((t.updatedAt || '') > (cur.updatedAt || '')) { cur.name = t.name; cur.color = t.color; cur.note = t.note || ''; cur.updatedAt = t.updatedAt; }
   });
 
@@ -2920,18 +2925,31 @@ function mergeState(remote) {
     if ((ns.updatedAt || '') > (cur.updatedAt || '')) { cur.name = ns.name; cur.desc = ns.desc; cur.color = ns.color; cur.type = ns.type; cur.updatedAt = ns.updatedAt; }
   });
 
-  // gelöschte Einträge respektieren (Grabsteine)
-  const tomb = { ...(ui.deleted || {}), ...((r.ui && r.ui.deleted) || {}) };
+  /* Löschmarken zusammenführen — je Eintrag gilt die jüngste Marke. */
+  const tomb = { ...(ui.deleted || {}) };
+  const rt = (r.ui && r.ui.deleted) || {};
+  for (const k in rt) if (!tomb[k] || rt[k] > tomb[k]) tomb[k] = rt[k];
+
+  /* Eine Löschmarke darf nur zählen, wenn sie JÜNGER ist als der Eintrag.
+     Sonst würde ein später wieder hinzugefügtes Video für immer verschwinden. */
   if (Object.keys(tomb).length) {
-    videos   = videos.filter(v => !tomb['v:' + v.videoId]);
-    stations = stations.filter(s => !tomb['s:' + s.url]);
-    topics   = topics.filter(t => !tomb['t:' + t.id]);
+    const wegDamit = (key, stand) => { const t = tomb[key]; return !!t && (stand || '') < t; };
+    videos   = videos.filter(v => !wegDamit('v:' + v.videoId, v.updatedAt || v.addedAt));
+    stations = stations.filter(s => !wegDamit('s:' + s.url,   s.updatedAt));
+    topics   = topics.filter(t   => !wegDamit('t:' + t.id,    t.updatedAt));
     ui.deleted = tomb;
   }
 
   dailyC = dailyMerge(dailyC, r.dailyC || {});
   dailyRebuild();
   return added;
+}
+
+/* Wird etwas wieder angelegt, muss seine Löschmarke weg — sonst löscht der
+   nächste Abgleich es sofort wieder. */
+function untombstone(key) {
+  if (ui.deleted && ui.deleted[key]) { delete ui.deleted[key]; return true; }
+  return false;
 }
 
 /* Löschungen müssen mitwandern, sonst kommt Gelöschtes beim nächsten Abgleich zurück. */
