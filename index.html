@@ -392,6 +392,13 @@
   .tr-status { display:flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--text-muted); }
   .tr-status .dot { width:7px; height:7px; border-radius:50%; background:var(--text-muted); }
   .tr-status.on { color:var(--green); } .tr-status.on .dot { background:var(--green); animation:pulse 1.5s infinite; }
+  .tr-select { width:auto; padding:5px 8px; font-size:11.5px; font-weight:600; background:var(--bg); }
+  .dl-bar { padding:12px 20px; border-bottom:1px solid var(--border); background:var(--bg-soft); flex-shrink:0; }
+  .dl-head { display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:7px; }
+  .dl-track { height:7px; background:var(--bg-input); border-radius:5px; overflow:hidden; }
+  .dl-fill { height:100%; width:0%; background:var(--accent); border-radius:5px; transition:width .25s; }
+  .dl-note { font-size:11px; color:var(--text-muted); margin-top:7px; }
+  .tr-text.pending { color:var(--text-muted); }
   .mic-meter { display:flex; align-items:center; gap:6px; color:var(--text-muted); }
   .mic-meter svg { width:13px; height:13px; fill:currentColor; flex-shrink:0; }
   .mm-track { width:54px; height:5px; background:var(--bg-input); border-radius:3px; overflow:hidden; }
@@ -575,9 +582,18 @@
           <div class="tr-head">
             <div>
               <div class="tr-title">Live-Mitschrift</div>
-              <div class="tr-sub" id="trSub">Spracherkennung des Browsers · Deutsch</div>
+              <div class="tr-sub" id="trSub">Direkt aus dem Stream · Whisper auf deiner Grafikkarte</div>
             </div>
             <div class="tr-ctrls">
+              <select class="form-select tr-select" id="trMode" onchange="setTrMode(this.value)" title="Woher der Ton kommt">
+                <option value="stream">🎧 Direkt aus dem Stream</option>
+                <option value="mic">🎙 Über Mikrofon</option>
+              </select>
+              <select class="form-select tr-select" id="trModel" onchange="setWhisperModel(this.value)" title="Größeres Modell = genauer, aber langsamer">
+                <option value="onnx-community/whisper-base">Whisper base · ~145 MB</option>
+                <option value="onnx-community/whisper-tiny">Whisper tiny · ~60 MB</option>
+                <option value="onnx-community/whisper-small">Whisper small · ~500 MB</option>
+              </select>
               <span class="tr-status" id="trStatus"><span class="dot"></span>Inaktiv</span>
               <span class="mic-meter" id="micMeter" style="display:none;">
                 <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0H3a9 9 0 0 0 8 8.94V22h2v-2.06A9 9 0 0 0 21 11h-2z"/></svg>
@@ -588,6 +604,11 @@
               <button class="btn btn-sm" onclick="clearTranscript()" title="Mitschrift leeren">✕ Leeren</button>
               <button class="btn btn-sm btn-primary" id="trBtn" onclick="toggleTranscription()">🎙 Mitschrift starten</button>
             </div>
+          </div>
+          <div class="dl-bar" id="dlBar" style="display:none;">
+            <div class="dl-head"><span id="dlLabel">Modell wird geladen…</span><span id="dlPct">0 %</span></div>
+            <div class="dl-track"><div class="dl-fill" id="dlFill"></div></div>
+            <div class="dl-note">Einmaliger Download — danach liegt das Modell im Browser-Cache und funktioniert auch offline.</div>
           </div>
           <div class="tr-body" id="trBody"></div>
         </div>
@@ -1349,8 +1370,20 @@ function playStation(id) {
   } else {
     audio.src = s.url;
     audio.play().catch(() => showToast('Stream konnte nicht gestartet werden.'));
+    // Läuft der Mitschnitt, muss der neue Sender CORS erlauben — sonst ohne Mitschnitt weiterspielen.
+    if (audio.crossOrigin) {
+      audio.addEventListener('error', function onCorsFail() {
+        audio.removeEventListener('error', onCorsFail);
+        if (!audio.crossOrigin) return;
+        audio.removeAttribute('crossorigin'); audio.crossOrigin = null;
+        audio.src = s.url; audio.load(); audio.play().catch(()=>{});
+        if (trWantsRun && trMode === 'stream') { stopTranscription(); showToast('„' + s.name + '“ erlaubt keinen direkten Mitschnitt.'); }
+      }, { once:true });
+    }
   }
 
+  // Nach createMediaElementSource läuft der Ton nur noch durch den Graphen
+  if (capCtx && capCtx.state === 'suspended') capCtx.resume().catch(()=>{});
   startRadioTicking();
   saveData(); updateRadioBar(); renderStations();
 }
@@ -1358,6 +1391,7 @@ function playStation(id) {
 function toggleRadio() {
   const audio = radioEl();
   if (!currentStation) { if (stations.length) playStation(ui.lastStation || stations[0].id); return; }
+  if (capCtx && capCtx.state === 'suspended') capCtx.resume().catch(()=>{});
   if (audio.paused) audio.play().catch(() => playStation(currentStation.id));
   else audio.pause();
   updateRadioBar(); renderStations();
@@ -1472,19 +1506,33 @@ let micStream = null, micCtx = null, micAnalyser = null, micRaf = null, micLevel
 let trRestartTimer = null, trWatchdog = null, trLastResultAt = 0, trHintShown = false;
 
 function transcriptPlaceholder() {
+  if (trMode === 'stream') {
+    return `<div class="tr-placeholder">
+      <strong>Live-Mitschrift direkt aus dem Stream</strong><br><br>
+      Starte einen Sender und klicke oben auf <b>„Mitschrift starten“</b>.
+      Der Ton wird direkt aus dem Player abgegriffen — <b>kein Mikrofon</b>, Kopfhörer sind völlig in Ordnung,
+      und die Erkennung läuft komplett auf deinem Rechner.
+      <div class="tr-note">
+        <b>Was dabei passiert:</b><br>
+        · Beim ersten Mal lädt das Whisper-Modell (${whisperModel.includes('tiny') ? 'rund 60 MB' : whisperModel.includes('small') ? 'rund 500 MB' : 'rund 145 MB'}). Danach liegt es im Browser-Cache und läuft auch offline.<br>
+        · Erkannt wird in Blöcken von ${WINDOW_S} Sekunden — der erste Satz erscheint also mit etwas Verzögerung.<br>
+        · <b>Nichts verlässt deinen Rechner.</b> Kein Server, kein Google, keine Aufnahme.<br>
+        · Nicht jeder Sender erlaubt den direkten Mitschnitt. Wenn nicht, sagt die App es dir und du kannst auf „Über Mikrofon“ wechseln.
+      </div></div>`;
+  }
   if (!SR) return `<div class="tr-placeholder">
     <strong>Dein Browser kann keine Spracherkennung.</strong><br>
-    Die Live-Mitschrift braucht Chrome oder Edge — in Firefox und Safari ist die Web-Speech-API nicht verfügbar.
-    Der Radio-Player selbst funktioniert hier trotzdem.</div>`;
+    Der Mikrofon-Weg braucht Chrome oder Edge. Nimm stattdessen <b>„Direkt aus dem Stream“</b> —
+    der läuft lokal und ist ohnehin der bessere Weg.</div>`;
   return `<div class="tr-placeholder">
-    <strong>Live-Mitschrift des laufenden Senders</strong><br><br>
-    Starte einen Sender, stelle sicher, dass er über <b>Lautsprecher</b> läuft, und klicke oben auf
-    <b>„Mitschrift starten“</b>. Der Browser hört über dein Mikrofon mit und schreibt mit.
+    <strong>Mitschrift über das Mikrofon</strong><br><br>
+    Rückfall für Sender, die keinen direkten Mitschnitt erlauben. Der Sender muss dafür über
+    <b>Lautsprecher</b> laufen, damit das Mikrofon ihn hört.
     <div class="tr-note">
       <b>Drei Dinge, die du wissen solltest:</b><br>
-      · Es läuft über das <b>Mikrofon</b>, nicht über den Stream direkt — mit Kopfhörern hört die Erkennung nichts.<br>
+      · Es läuft über das <b>Mikrofon</b> — mit Kopfhörern hört die Erkennung nichts.<br>
       · Der <b>Pegelbalken</b> oben zeigt, ob das Mikrofon den Sender überhaupt hört. Bleibt er rot, ist es zu leise oder das falsche Eingabegerät.<br>
-      · Chrome schickt den Ton zur Erkennung an Google. Für Radio unbedenklich, aber lass sie nicht nebenbei laufen, während du Privates besprichst.
+      · Chrome schickt den Ton zur Erkennung an Google. Der Stream-Weg oben tut das nicht.
     </div></div>`;
 }
 
@@ -1616,11 +1664,285 @@ function buildRecogniser() {
   return r;
 }
 
+/* =====================================================================
+   MITSCHRIFT DIREKT AUS DEM STREAM — Whisper lokal im Browser
+   Kein Mikrofon, kein Server, nichts geht an Google. Der Ton wird per
+   Web Audio vom <audio>-Element abgegriffen und on-device transkribiert.
+   ===================================================================== */
+const WHISPER_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js';
+const SAMPLE_RATE = 16000;   // Whisper erwartet 16 kHz mono
+const WINDOW_S    = 15;      // Länge eines Transkriptionsfensters
+const HOP_S       = 12;      // Vorschub — 3 s Überlappung gegen abgeschnittene Wörter
+
+let trMode = 'stream';
+let whisperModel = 'onnx-community/whisper-base';
+let waWorker = null, waReady = false, waLoading = false, waBusy = false, waSeq = 0;
+let capCtx = null, capSource = null, capNode = null, capChunks = [], capSamples = 0, capRate = 48000;
+let pcmQueue = [], lastTail = '';
+
+function trHasStream() { return !!currentStation && !!radioEl().src; }
+
+function setTrMode(m) {
+  if (trWantsRun) stopTranscription();
+  trMode = m; ui.trMode = m; saveData();
+  document.getElementById('trModel').style.display = m === 'stream' ? '' : 'none';
+  document.getElementById('trSub').textContent = m === 'stream'
+    ? 'Direkt aus dem Stream · Whisper auf deiner Grafikkarte'
+    : 'Über Mikrofon · Spracherkennung des Browsers';
+  renderTranscript();
+}
+function setWhisperModel(m) {
+  if (m === whisperModel) return;
+  const running = trWantsRun;
+  if (running) stopTranscription();
+  whisperModel = m; ui.whisperModel = m; saveData();
+  if (waWorker) { waWorker.terminate(); waWorker = null; }
+  waReady = false; waLoading = false;
+  showToast('Modell gewechselt — wird beim nächsten Start geladen.');
+}
+
+function showDl(show, label, pct) {
+  const b = document.getElementById('dlBar');
+  b.style.display = show ? '' : 'none';
+  if (!show) return;
+  if (label !== undefined) document.getElementById('dlLabel').textContent = label;
+  if (pct !== undefined) {
+    document.getElementById('dlPct').textContent = Math.round(pct) + ' %';
+    document.getElementById('dlFill').style.width = Math.max(2, pct) + '%';
+  }
+}
+
+/* ---------- Worker (aus einem Blob, damit die App eine einzige Datei bleibt) ---------- */
+function whisperWorkerSource() {
+  return `
+import { pipeline, env } from '${WHISPER_CDN}';
+env.allowLocalModels = false;
+let tr = null;
+const files = {};
+self.onmessage = async (e) => {
+  const { type, data } = e.data;
+  if (type === 'load') {
+    try {
+      tr = await pipeline('automatic-speech-recognition', data.model, {
+        device: data.device,
+        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' },
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.file) {
+            files[p.file] = { loaded: p.loaded || 0, total: p.total || 0 };
+            let l = 0, t = 0;
+            for (const k in files) { l += files[k].loaded; t += files[k].total; }
+            if (t > 0) self.postMessage({ status: 'progress', pct: (l / t) * 100 });
+          } else if (p.status === 'ready' || p.status === 'done') {
+            self.postMessage({ status: 'progress', pct: 100 });
+          }
+        }
+      });
+      self.postMessage({ status: 'warmup' });
+      await tr(new Float32Array(${SAMPLE_RATE}), { language: 'de', task: 'transcribe' });
+      self.postMessage({ status: 'ready' });
+    } catch (err) {
+      self.postMessage({ status: 'error', message: String(err && err.message || err) });
+    }
+  } else if (type === 'run') {
+    if (!tr) return;
+    try {
+      const out = await tr(data.audio, { language: 'de', task: 'transcribe', return_timestamps: false });
+      self.postMessage({ status: 'text', text: (out && out.text) || '', seq: data.seq });
+    } catch (err) {
+      self.postMessage({ status: 'error', message: String(err && err.message || err), seq: data.seq });
+    }
+  }
+};`;
+}
+
+function ensureWhisper() {
+  if (waReady || waLoading) return;
+  waLoading = true;
+  showDl(true, 'Whisper-Modell wird geladen…', 0);
+  setTrStatus('Modell lädt…', 'wait');
+
+  const url = URL.createObjectURL(new Blob([whisperWorkerSource()], { type: 'text/javascript' }));
+  waWorker = new Worker(url, { type: 'module' });
+
+  waWorker.onmessage = ev => {
+    const m = ev.data;
+    if (m.status === 'progress') showDl(true, 'Whisper-Modell wird geladen…', m.pct);
+    else if (m.status === 'warmup') showDl(true, 'Modell wird für die Grafikkarte vorbereitet…', 100);
+    else if (m.status === 'ready') {
+      waLoading = false; waReady = true; showDl(false);
+      if (trWantsRun) setTrStatus('Hört mit…', 'on');
+      showToast('Whisper bereit — läuft ab jetzt lokal.');
+    } else if (m.status === 'text') {
+      waBusy = false;
+      appendWhisperText(m.text);
+    } else if (m.status === 'error') {
+      waBusy = false; waLoading = false;
+      showDl(false);
+      console.error('Whisper:', m.message);
+      if (!waReady) {
+        trWantsRun = false;
+        setTrStatus('Modell fehlgeschlagen', 'off');
+        showToast('Whisper konnte nicht laden — bitte „Über Mikrofon“ wählen.');
+      }
+    }
+  };
+  waWorker.onerror = err => {
+    waLoading = false; showDl(false);
+    console.error('Worker:', err.message);
+    trWantsRun = false; setTrStatus('Modell fehlgeschlagen', 'off');
+    showToast('Whisper konnte nicht starten — bitte „Über Mikrofon“ wählen.');
+  };
+
+  waWorker.postMessage({ type:'load', data:{ model: whisperModel, device: navigator.gpu ? 'webgpu' : 'wasm' } });
+}
+
+/* Überlappung entfernen: das neue Fenster beginnt oft mit dem Ende des alten. */
+function appendWhisperText(raw) {
+  let txt = (raw || '').replace(/\s+/g, ' ').trim();
+  if (!txt || /^[\s.,!?-]*$/.test(txt)) return;
+  if (lastTail) {
+    const words = txt.split(' ');
+    for (let n = Math.min(12, words.length); n >= 3; n--) {
+      const head = words.slice(0, n).join(' ').toLowerCase();
+      if (lastTail.toLowerCase().endsWith(head)) { txt = words.slice(n).join(' ').trim(); break; }
+    }
+  }
+  if (!txt) return;
+  const d = new Date();
+  transcript.push({ t: String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'), s: txt });
+  if (transcript.length > 800) transcript.splice(0, transcript.length - 800);
+  lastTail = txt.split(' ').slice(-12).join(' ');
+  interimText = '';
+  trLastResultAt = Date.now(); trHintShown = false;
+  renderTranscript();
+}
+
+/* ---------- Ton direkt vom Player abgreifen ---------- */
+async function startStreamCapture() {
+  const audio = radioEl();
+  if (!trHasStream()) { showToast('Starte zuerst einen Sender.'); return false; }
+
+  // Für den Zugriff auf die Samples muss der Stream CORS erlauben.
+  if (!audio.crossOrigin && currentStation.type !== 'hls') {
+    const st = currentStation, pos = audio.currentTime;
+    audio.crossOrigin = 'anonymous';
+    const ok = await new Promise(res => {
+      let done = false;
+      const good = () => { if (!done) { done = true; cleanup(); res(true); } };
+      const bad  = () => { if (!done) { done = true; cleanup(); res(false); } };
+      const cleanup = () => { audio.removeEventListener('canplay', good); audio.removeEventListener('error', bad); clearTimeout(tm); };
+      const tm = setTimeout(good, 6000);
+      audio.addEventListener('canplay', good); audio.addEventListener('error', bad);
+      audio.src = st.url; audio.load(); audio.play().catch(()=>{});
+    });
+    if (!ok) {                       // Sender erlaubt kein CORS → ohne Mitschnitt weiterspielen
+      audio.removeAttribute('crossorigin'); audio.crossOrigin = null;
+      audio.src = st.url; audio.load(); audio.play().catch(()=>{});
+      showToast('„' + st.name + '“ erlaubt keinen direkten Mitschnitt — bitte „Über Mikrofon“ wählen.');
+      return false;
+    }
+  }
+
+  try {
+    if (!capCtx) capCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (capCtx.state === 'suspended') await capCtx.resume();
+    capRate = capCtx.sampleRate;
+    if (!capSource) capSource = capCtx.createMediaElementSource(audio);   // nur einmal pro Element möglich
+
+    if (!capNode) {
+      const src = `class C extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(new Float32Array(c));return true;}}registerProcessor('cap',C);`;
+      await capCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([src], { type:'text/javascript' })));
+      capNode = new AudioWorkletNode(capCtx, 'cap');
+      capNode.port.onmessage = e => onCapturedAudio(e.data);
+    }
+    capSource.connect(capCtx.destination);      // Ton bleibt hörbar
+    capSource.connect(capNode);
+    return true;
+  } catch (e) {
+    console.error('Capture:', e);
+    showToast('Ton konnte nicht abgegriffen werden — bitte „Über Mikrofon“ wählen.');
+    return false;
+  }
+}
+
+function stopStreamCapture() {
+  try { if (capSource && capNode) capSource.disconnect(capNode); } catch {}
+  capChunks = []; capSamples = 0; pcmQueue = []; lastTail = '';
+}
+
+function onCapturedAudio(chunk) {
+  if (!trWantsRun || trMode !== 'stream') return;
+  capChunks.push(chunk); capSamples += chunk.length;
+  const need = Math.round(WINDOW_S * capRate);
+  if (capSamples < need) return;
+
+  const flat = new Float32Array(capSamples);
+  let o = 0; for (const c of capChunks) { flat.set(c, o); o += c.length; }
+
+  const pcm = downsampleTo16k(flat, capRate);
+  const level = rms(pcm);
+  micLevel = level; renderMicMeter();
+
+  // nur schicken, wenn überhaupt Ton da ist und das Modell frei ist
+  if (waReady && !waBusy && level > 0.0015) {
+    waBusy = true;
+    waWorker.postMessage({ type:'run', data:{ audio: pcm, seq: ++waSeq } }, [pcm.buffer]);
+    setTrStatus('Hört mit…', 'on');
+  }
+
+  // Fenster vorschieben, Überlappung behalten
+  const keep = Math.round((WINDOW_S - HOP_S) * capRate);
+  const tail = flat.subarray(Math.max(0, flat.length - keep));
+  capChunks = [new Float32Array(tail)]; capSamples = tail.length;
+}
+
+function downsampleTo16k(input, rate) {
+  if (rate === SAMPLE_RATE) return new Float32Array(input);
+  const ratio = rate / SAMPLE_RATE;
+  const out = new Float32Array(Math.floor(input.length / ratio));
+  for (let i = 0; i < out.length; i++) {
+    const start = Math.floor(i * ratio), end = Math.min(input.length, Math.floor((i + 1) * ratio));
+    let s = 0, n = 0;
+    for (let j = start; j < end; j++) { s += input[j]; n++; }     // Mittelung wirkt als einfacher Tiefpass
+    out[i] = n ? s / n : 0;
+  }
+  return out;
+}
+function rms(a) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i]; return Math.sqrt(s / (a.length || 1)); }
+
 function toggleTranscription() { trWantsRun ? stopTranscription() : startTranscription(); }
 
 async function startTranscription() {
-  if (!SR) { showToast('Spracherkennung braucht Chrome oder Edge.'); return; }
   if (trWantsRun) return;                       // Doppelklick abfangen
+
+  /* --- Weg 1: direkt aus dem Stream, lokal per Whisper --- */
+  if (trMode === 'stream') {
+    if (!trHasStream()) { showToast('Starte zuerst einen Sender.'); return; }
+    trWantsRun = true;
+    setTrStatus('Ton wird abgegriffen…', 'wait');
+    renderTranscript();
+    document.getElementById('micMeter').style.display = 'flex';
+
+    if (!(await startStreamCapture())) { trWantsRun = false; setTrStatus('Inaktiv', 'off'); renderTranscript(); return; }
+    if (!trWantsRun) { stopStreamCapture(); return; }
+
+    ensureWhisper();
+    if (waReady) setTrStatus('Hört mit…', 'on');
+    trLastResultAt = Date.now(); trHintShown = false;
+    clearInterval(trWatchdog);
+    trWatchdog = setInterval(() => {
+      if (!trWantsRun || !waReady) return;
+      if (Date.now() - trLastResultAt < 45000 || trHintShown) return;
+      trHintShown = true;
+      showToast(micLevel < 0.002
+        ? 'Kein Ton im Stream erkannt — läuft der Sender noch?'
+        : 'Noch nichts erkannt — bei Musik ohne Sprache ist das normal.');
+    }, 8000);
+    return;
+  }
+
+  /* --- Weg 2: Mikrofon (Rückfall) --- */
+  if (!SR) { showToast('Spracherkennung braucht Chrome oder Edge.'); return; }
 
   // Absicht sofort anzeigen — Chrome braucht bis zum onstart oft über eine Sekunde
   trWantsRun = true;
@@ -1658,6 +1980,9 @@ function stopTranscription() {
   clearTimeout(trRestartTimer); clearInterval(trWatchdog);
   if (recog) { try { recog.abort(); } catch {} try { recog.stop(); } catch {} }
   stopMicMeter();
+  stopStreamCapture();
+  waBusy = false; micLevel = 0;
+  showDl(false);
   interimText = ''; setTrStatus('Inaktiv', 'off'); renderTranscript();
 }
 
@@ -2305,8 +2630,13 @@ function init() {
   radioEl().addEventListener('error', () => {
     if (currentStation) showToast('Sender „' + currentStation.name + '“ nicht erreichbar.');
   });
-  document.getElementById('trBody').innerHTML = transcriptPlaceholder();
-  if (!SR) document.getElementById('trSub').textContent = 'In diesem Browser nicht verfügbar — Chrome oder Edge nötig';
+  // Mitschrift-Einstellungen wiederherstellen
+  trMode = ui.trMode || 'stream';
+  whisperModel = ui.whisperModel || 'onnx-community/whisper-base';
+  document.getElementById('trMode').value = trMode;
+  document.getElementById('trModel').value = whisperModel;
+  setTrMode(trMode);
+  if (!navigator.gpu) document.getElementById('trSub').textContent += ' (ohne WebGPU — langsamer)';
 
   // Deep-Link ?v=VIDEOID
   const q = new URLSearchParams(location.search).get('v');
