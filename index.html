@@ -392,6 +392,12 @@
   .tr-status { display:flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--text-muted); }
   .tr-status .dot { width:7px; height:7px; border-radius:50%; background:var(--text-muted); }
   .tr-status.on { color:var(--green); } .tr-status.on .dot { background:var(--green); animation:pulse 1.5s infinite; }
+  .mic-meter { display:flex; align-items:center; gap:6px; color:var(--text-muted); }
+  .mic-meter svg { width:13px; height:13px; fill:currentColor; flex-shrink:0; }
+  .mm-track { width:54px; height:5px; background:var(--bg-input); border-radius:3px; overflow:hidden; }
+  .mm-fill { display:block; height:100%; width:0%; border-radius:3px; transition:width .09s linear, background .3s; }
+  .tr-status.wait .dot { background:var(--yellow); animation:pulse 1.1s infinite; }
+
   .tr-body { flex:1; overflow-y:auto; padding:16px 20px 28px; }
   .tr-body::-webkit-scrollbar { width:9px; }
   .tr-body::-webkit-scrollbar-thumb { background:var(--border-light); border-radius:5px; }
@@ -573,6 +579,10 @@
             </div>
             <div class="tr-ctrls">
               <span class="tr-status" id="trStatus"><span class="dot"></span>Inaktiv</span>
+              <span class="mic-meter" id="micMeter" style="display:none;">
+                <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0H3a9 9 0 0 0 8 8.94V22h2v-2.06A9 9 0 0 0 21 11h-2z"/></svg>
+                <span class="mm-track"><span class="mm-fill"></span></span>
+              </span>
               <button class="btn btn-sm" onclick="copyTranscript()" title="Alles kopieren">⧉ Kopieren</button>
               <button class="btn btn-sm" onclick="downloadTranscript()" title="Als Textdatei sichern">⬇ Sichern</button>
               <button class="btn btn-sm" onclick="clearTranscript()" title="Mitschrift leeren">✕ Leeren</button>
@@ -1358,7 +1368,7 @@ function stopRadio() {
   if (hls) { try { hls.destroy(); } catch {} hls = null; }
   audio.pause(); audio.removeAttribute('src'); audio.load();
   clearInterval(radioTimer); radioTimer = null;
-  if (isTranscribing) stopTranscription();
+  if (trWantsRun) stopTranscription();
   currentStation = null; radioSessionSec = 0;
   saveData(true); updateRadioBar(); renderStations();
 }
@@ -1458,6 +1468,8 @@ function deleteStation(id) {
    ===================================================================== */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recog = null, isTranscribing = false, transcript = [], interimText = '', trWantsRun = false;
+let micStream = null, micCtx = null, micAnalyser = null, micRaf = null, micLevel = 0;
+let trRestartTimer = null, trWatchdog = null, trLastResultAt = 0, trHintShown = false;
 
 function transcriptPlaceholder() {
   if (!SR) return `<div class="tr-placeholder">
@@ -1469,8 +1481,9 @@ function transcriptPlaceholder() {
     Starte einen Sender, stelle sicher, dass er über <b>Lautsprecher</b> läuft, und klicke oben auf
     <b>„Mitschrift starten“</b>. Der Browser hört über dein Mikrofon mit und schreibt mit.
     <div class="tr-note">
-      <b>Zwei Dinge, die du wissen solltest:</b><br>
+      <b>Drei Dinge, die du wissen solltest:</b><br>
       · Es läuft über das <b>Mikrofon</b>, nicht über den Stream direkt — mit Kopfhörern hört die Erkennung nichts.<br>
+      · Der <b>Pegelbalken</b> oben zeigt, ob das Mikrofon den Sender überhaupt hört. Bleibt er rot, ist es zu leise oder das falsche Eingabegerät.<br>
       · Chrome schickt den Ton zur Erkennung an Google. Für Radio unbedenklich, aber lass sie nicht nebenbei laufen, während du Privates besprichst.
     </div></div>`;
 }
@@ -1485,29 +1498,80 @@ function renderTranscript() {
   if (atBottom) box.scrollTop = box.scrollHeight;
 }
 
-function setTrStatus(txt, on) {
+/* Der Knopf spiegelt die Absicht (trWantsRun), nicht den Verbindungszustand —
+   sonst steht beim ersten Klick sekundenlang „Inaktiv“ da, während Chrome erst verbindet. */
+function setTrStatus(txt, mode) {   // mode: 'on' | 'wait' | 'off'
   const el = document.getElementById('trStatus');
-  el.classList.toggle('on', !!on);
+  el.classList.toggle('on', mode === 'on');
+  el.classList.toggle('wait', mode === 'wait');
   el.innerHTML = `<span class="dot"></span>${txt}`;
-  document.getElementById('trBtn').textContent = on ? '⏹ Mitschrift stoppen' : '🎙 Mitschrift starten';
+  document.getElementById('trBtn').textContent = trWantsRun ? '⏹ Mitschrift stoppen' : '🎙 Mitschrift starten';
+  renderMicMeter();
 }
 
-function toggleTranscription() { isTranscribing ? stopTranscription() : startTranscription(); }
+function renderMicMeter() {
+  const m = document.getElementById('micMeter');
+  if (!m) return;
+  m.style.display = trWantsRun ? 'flex' : 'none';
+  if (!trWantsRun) return;
+  const pct = Math.min(100, Math.round(micLevel * 320));
+  m.querySelector('.mm-fill').style.width = pct + '%';
+  m.querySelector('.mm-fill').style.background = pct < 6 ? 'var(--red)' : pct < 20 ? 'var(--yellow)' : 'var(--green)';
+  m.title = pct < 6 ? 'Das Mikrofon hört fast nichts — läuft das Radio über Lautsprecher?' : 'Mikrofon-Pegel';
+}
 
-function startTranscription() {
-  if (!SR) { showToast('Spracherkennung braucht Chrome oder Edge.'); return; }
-  if (!currentStation || radioEl().paused) showToast('Tipp: Starte zuerst einen Sender über Lautsprecher.');
+/* Mikrofon-Pegel sichtbar machen: der häufigste Grund für leere Mitschriften ist,
+   dass das Mikrofon den Sender schlicht nicht hört (Kopfhörer, zu leise, falsches Gerät). */
+async function startMicMeter() {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
+  } catch (e) {
+    micStream = null;
+    trWantsRun = false;
+    setTrStatus('Mikrofon blockiert', 'off');
+    showToast('Mikrofon-Zugriff nötig — im Schloss-Symbol der Adressleiste erlauben.');
+    return false;
+  }
+  try {
+    micCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (micCtx.state === 'suspended') await micCtx.resume();
+    micAnalyser = micCtx.createAnalyser();
+    micAnalyser.fftSize = 512;
+    micCtx.createMediaStreamSource(micStream).connect(micAnalyser);
+    const buf = new Uint8Array(micAnalyser.fftSize);
+    const loop = () => {
+      if (!micAnalyser) return;
+      micAnalyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
+      micLevel = Math.sqrt(sum / buf.length);
+      renderMicMeter();
+      micRaf = requestAnimationFrame(loop);
+    };
+    loop();
+  } catch {}
+  return true;
+}
 
-  recog = new SR();
-  recog.lang = 'de-DE';
-  recog.continuous = true;
-  recog.interimResults = true;
+function stopMicMeter() {
+  if (micRaf) cancelAnimationFrame(micRaf); micRaf = null;
+  micAnalyser = null; micLevel = 0;
+  if (micCtx) { try { micCtx.close(); } catch {} micCtx = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  renderMicMeter();
+}
 
-  recog.onstart  = () => { isTranscribing = true; setTrStatus('Hört zu…', true); };
-  recog.onresult = e => {
+function buildRecogniser() {
+  const r = new SR();
+  r.lang = 'de-DE'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+
+  r.onstart = () => { isTranscribing = true; setTrStatus('Hört zu…', 'on'); };
+
+  r.onresult = e => {
+    trLastResultAt = Date.now(); trHintShown = false;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      const txt = e.results[i][0].transcript.trim();
+      const txt = (e.results[i][0].transcript || '').trim();
       if (!txt) continue;
       if (e.results[i].isFinal) {
         const d = new Date();
@@ -1518,32 +1582,83 @@ function startTranscription() {
     interimText = interim.trim();
     renderTranscript();
   };
-  recog.onerror = e => {
+
+  r.onerror = e => {
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      trWantsRun = false; isTranscribing = false;
-      setTrStatus('Mikrofon blockiert', false);
-      showToast('Mikrofon-Zugriff nötig — bitte im Browser erlauben.');
+      trWantsRun = false; isTranscribing = false; stopMicMeter();
+      setTrStatus('Mikrofon blockiert', 'off');
+      showToast('Mikrofon-Zugriff nötig — im Schloss-Symbol der Adressleiste erlauben.');
     } else if (e.error === 'audio-capture') {
-      trWantsRun = false; isTranscribing = false;
-      setTrStatus('Kein Mikrofon', false);
+      trWantsRun = false; isTranscribing = false; stopMicMeter();
+      setTrStatus('Kein Mikrofon', 'off');
       showToast('Kein Mikrofon gefunden.');
+    } else if (e.error === 'network') {
+      setTrStatus('Keine Verbindung…', 'wait');
     }
-    // 'no-speech' und 'network' ignorieren — onend startet neu
-  };
-  recog.onend = () => {
-    // Chrome beendet nach Stille von selbst — solange gewollt, neu starten
-    if (trWantsRun) { try { recog.start(); } catch {} }
-    else { isTranscribing = false; interimText = ''; setTrStatus('Inaktiv', false); renderTranscript(); }
+    // 'no-speech' / 'aborted' sind normal — onend startet gleich neu
   };
 
+  /* Chrome beendet nach kurzer Stille von selbst. Neustart NIE synchron in onend —
+     das wirft InvalidStateError und die Erkennung stirbt still. */
+  r.onend = () => {
+    isTranscribing = false;
+    if (!trWantsRun) {
+      interimText = ''; setTrStatus('Inaktiv', 'off'); renderTranscript(); return;
+    }
+    setTrStatus('Verbinde neu…', 'wait');
+    clearTimeout(trRestartTimer);
+    trRestartTimer = setTimeout(() => {
+      if (!trWantsRun) return;
+      try { recog.start(); }
+      catch { clearTimeout(trRestartTimer); trRestartTimer = setTimeout(() => { if (trWantsRun) try { recog.start(); } catch {} }, 900); }
+    }, 350);
+  };
+  return r;
+}
+
+function toggleTranscription() { trWantsRun ? stopTranscription() : startTranscription(); }
+
+async function startTranscription() {
+  if (!SR) { showToast('Spracherkennung braucht Chrome oder Edge.'); return; }
+  if (trWantsRun) return;                       // Doppelklick abfangen
+
+  // Absicht sofort anzeigen — Chrome braucht bis zum onstart oft über eine Sekunde
   trWantsRun = true;
-  try { recog.start(); } catch { showToast('Mitschrift läuft bereits.'); }
+  setTrStatus('Verbinde…', 'wait');
+  renderTranscript();
+
+  if (!currentStation || radioEl().paused) showToast('Tipp: Starte zuerst einen Sender über Lautsprecher.');
+
+  if (!(await startMicMeter())) return;         // Pegelanzeige + klare Rechtefrage
+  if (!trWantsRun) { stopMicMeter(); return; }  // zwischenzeitlich gestoppt
+
+  if (!recog) recog = buildRecogniser();
+  try { recog.start(); }
+  catch {                                       // Instanz hängt noch — sauber neu aufbauen
+    try { recog.abort(); } catch {}
+    recog = buildRecogniser();
+    setTimeout(() => { if (trWantsRun) try { recog.start(); } catch {} }, 400);
+  }
+
+  // Wachhund: läuft die Erkennung, kommt aber nichts an, sagen wir warum
+  trLastResultAt = Date.now(); trHintShown = false;
+  clearInterval(trWatchdog);
+  trWatchdog = setInterval(() => {
+    if (!trWantsRun) return;
+    if (Date.now() - trLastResultAt < 15000 || trHintShown) return;
+    trHintShown = true;
+    showToast(micLevel < 0.02
+      ? 'Das Mikrofon hört nichts — läuft der Sender über Lautsprecher?'
+      : 'Ton kommt an, aber es wird nichts erkannt — bitte lauter stellen.');
+  }, 5000);
 }
 
 function stopTranscription() {
   trWantsRun = false; isTranscribing = false;
-  if (recog) { try { recog.stop(); } catch {} }
-  interimText = ''; setTrStatus('Inaktiv', false); renderTranscript();
+  clearTimeout(trRestartTimer); clearInterval(trWatchdog);
+  if (recog) { try { recog.abort(); } catch {} try { recog.stop(); } catch {} }
+  stopMicMeter();
+  interimText = ''; setTrStatus('Inaktiv', 'off'); renderTranscript();
 }
 
 function clearTranscript() {
