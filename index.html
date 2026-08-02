@@ -393,6 +393,26 @@
   .tr-status .dot { width:7px; height:7px; border-radius:50%; background:var(--text-muted); }
   .tr-status.on { color:var(--green); } .tr-status.on .dot { background:var(--green); animation:pulse 1.5s infinite; }
   .tr-select { width:auto; padding:5px 8px; font-size:11.5px; font-weight:600; background:var(--bg); }
+
+  /* Startknopf oben — deutlich größer als die Nebenaktionen */
+  #trBtn {
+    font-size:13.5px; font-weight:700; padding:10px 18px; border-radius:10px;
+    box-shadow:0 2px 10px rgba(107,63,160,.35);
+  }
+  #trBtn.running { background:var(--red); border-color:var(--red); box-shadow:0 2px 10px rgba(220,38,38,.3); }
+  #trBtn.running:hover { background:#b91c1c; border-color:#b91c1c; }
+
+  /* Großer Startknopf mitten im leeren Bereich — dort schaut man hin */
+  .tr-cta {
+    display:inline-flex; align-items:center; gap:11px; margin:4px 0 22px;
+    font-family:inherit; font-size:16px; font-weight:700; padding:16px 30px;
+    border:none; border-radius:14px; background:var(--accent); color:#fff; cursor:pointer;
+    box-shadow:0 6px 22px rgba(107,63,160,.34); transition:transform .15s, box-shadow .15s, background .15s;
+  }
+  .tr-cta:hover { background:#5a3489; transform:translateY(-2px); box-shadow:0 9px 26px rgba(107,63,160,.42); }
+  .tr-cta:active { transform:translateY(0); }
+  .tr-cta svg { width:19px; height:19px; fill:currentColor; }
+  .tr-cta-hint { font-size:12.5px; color:var(--text-muted); margin-bottom:26px; }
   .dl-bar { padding:12px 20px; border-bottom:1px solid var(--border); background:var(--bg-soft); flex-shrink:0; }
   .dl-head { display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:7px; }
   .dl-track { height:7px; background:var(--bg-input); border-radius:5px; overflow:hidden; }
@@ -599,10 +619,12 @@
                 <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0H3a9 9 0 0 0 8 8.94V22h2v-2.06A9 9 0 0 0 21 11h-2z"/></svg>
                 <span class="mm-track"><span class="mm-fill"></span></span>
               </span>
-              <button class="btn btn-sm" onclick="copyTranscript()" title="Alles kopieren">⧉ Kopieren</button>
-              <button class="btn btn-sm" onclick="downloadTranscript()" title="Als Textdatei sichern">⬇ Sichern</button>
-              <button class="btn btn-sm" onclick="clearTranscript()" title="Mitschrift leeren">✕ Leeren</button>
-              <button class="btn btn-sm btn-primary" id="trBtn" onclick="toggleTranscription()">🎙 Mitschrift starten</button>
+              <span id="trDocActions" style="display:none;gap:7px;">
+                <button class="btn btn-sm" onclick="copyTranscript()" title="Alles kopieren">⧉ Kopieren</button>
+                <button class="btn btn-sm" onclick="downloadTranscript()" title="Als Textdatei sichern">⬇ Sichern</button>
+                <button class="btn btn-sm" onclick="clearTranscript()" title="Mitschrift leeren">✕ Leeren</button>
+              </span>
+              <button class="btn btn-primary" id="trBtn" onclick="toggleTranscription()">🎙 Live-Transkription starten</button>
             </div>
           </div>
           <div class="dl-bar" id="dlBar" style="display:none;">
@@ -1508,8 +1530,11 @@ let trRestartTimer = null, trWatchdog = null, trLastResultAt = 0, trHintShown = 
 function transcriptPlaceholder() {
   if (trMode === 'stream') {
     return `<div class="tr-placeholder">
-      <strong>Live-Mitschrift direkt aus dem Stream</strong><br><br>
-      Starte einen Sender und klicke oben auf <b>„Mitschrift starten“</b>.
+      <button class="tr-cta" onclick="toggleTranscription()">
+        <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0H3a9 9 0 0 0 8 8.94V22h2v-2.06A9 9 0 0 0 21 11h-2z"/></svg>
+        Live-Transkription starten
+      </button>
+      <div class="tr-cta-hint">Sender läuft? Dann hier klicken — der erste Text kommt nach etwa 15 Sekunden.</div>
       Der Ton wird direkt aus dem Player abgegriffen — <b>kein Mikrofon</b>, Kopfhörer sind völlig in Ordnung,
       und die Erkennung läuft komplett auf deinem Rechner.
       <div class="tr-note">
@@ -1525,9 +1550,12 @@ function transcriptPlaceholder() {
     Der Mikrofon-Weg braucht Chrome oder Edge. Nimm stattdessen <b>„Direkt aus dem Stream“</b> —
     der läuft lokal und ist ohnehin der bessere Weg.</div>`;
   return `<div class="tr-placeholder">
-    <strong>Mitschrift über das Mikrofon</strong><br><br>
-    Rückfall für Sender, die keinen direkten Mitschnitt erlauben. Der Sender muss dafür über
-    <b>Lautsprecher</b> laufen, damit das Mikrofon ihn hört.
+    <button class="tr-cta" onclick="toggleTranscription()">
+      <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0H3a9 9 0 0 0 8 8.94V22h2v-2.06A9 9 0 0 0 21 11h-2z"/></svg>
+      Transkription über Mikrofon starten
+    </button>
+    <div class="tr-cta-hint">Der Sender muss dafür über Lautsprecher laufen.</div>
+    Rückfall für Sender, die keinen direkten Mitschnitt erlauben.
     <div class="tr-note">
       <b>Drei Dinge, die du wissen solltest:</b><br>
       · Es läuft über das <b>Mikrofon</b> — mit Kopfhörern hört die Erkennung nichts.<br>
@@ -1538,6 +1566,8 @@ function transcriptPlaceholder() {
 
 function renderTranscript() {
   const box = document.getElementById('trBody');
+  const acts = document.getElementById('trDocActions');
+  if (acts) acts.style.display = transcript.length ? 'flex' : 'none';
   if (!transcript.length && !interimText) { box.innerHTML = transcriptPlaceholder(); return; }
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
   box.innerHTML = transcript.map(l =>
@@ -1553,7 +1583,11 @@ function setTrStatus(txt, mode) {   // mode: 'on' | 'wait' | 'off'
   el.classList.toggle('on', mode === 'on');
   el.classList.toggle('wait', mode === 'wait');
   el.innerHTML = `<span class="dot"></span>${txt}`;
-  document.getElementById('trBtn').textContent = trWantsRun ? '⏹ Mitschrift stoppen' : '🎙 Mitschrift starten';
+  const b = document.getElementById('trBtn');
+  b.textContent = trWantsRun ? '⏹ Transkription stoppen' : '🎙 Live-Transkription starten';
+  b.classList.toggle('running', trWantsRun);
+  // Kopieren/Sichern/Leeren nur zeigen, wenn es auch etwas zu kopieren gibt
+  document.getElementById('trDocActions').style.display = transcript.length ? 'flex' : 'none';
   renderMicMeter();
 }
 
