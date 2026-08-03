@@ -518,7 +518,14 @@
     .toolbar-actions { margin-left:auto; gap:6px; }
     .acct-btn { padding:7px 9px; }
     .acct-btn .acct-label { display:none; }    /* auf dem Handy reicht das Symbol */
-    .acct-menu { min-width:236px; }
+    /* Der Knopf steht auf dem Handy links — ein rechtsbündiges Menü liefe aus dem Bild.
+       Deshalb am Fenster ausrichten statt am Knopf. */
+    .acct-menu {
+      position:fixed; left:12px; right:12px; top:auto; min-width:0; width:auto;
+      max-height:min(70vh, 460px); overflow-y:auto;
+    }
+    .acct-item { padding:12px 13px; font-size:14px; }   /* größere Tippziele */
+    .acct-mail { font-size:13.5px; }
     .toolbar-actions .btn { padding:7px 10px; font-size:12px; }
 
     .tabs { order:3; width:100%; }
@@ -2680,8 +2687,21 @@ function onAcctClick(e) {
   const m = document.getElementById('acctMenu');
   const open = !m.classList.contains('show');
   m.classList.toggle('show', open);
-  if (open) renderAcctMenu();
+  if (open) { renderAcctMenu(); placeAcctMenu(); }
 }
+
+/* Auf dem Handy hängt das Menü am Fenster — die Höhe der Werkzeugleiste
+   ändert sich je nach Umbruch, also hier zur Laufzeit bestimmen. */
+function placeAcctMenu() {
+  const m = document.getElementById('acctMenu');
+  if (!m || window.innerWidth > 860) return;
+  const tb = document.querySelector('.toolbar');
+  m.style.top = ((tb ? tb.getBoundingClientRect().bottom : 56) + 8) + 'px';
+}
+window.addEventListener('resize', () => {
+  const m = document.getElementById('acctMenu');
+  if (m && m.classList.contains('show')) placeAcctMenu();
+});
 function closeAcctMenu() { const m = document.getElementById('acctMenu'); if (m) m.classList.remove('show'); }
 
 function renderAcctMenu() {
