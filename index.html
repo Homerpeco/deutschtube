@@ -413,6 +413,8 @@
   .acct-dot.busy { background:var(--blue); animation:pulse 1.2s infinite; }
   .acct-dot.err { background:var(--red); }
   .acct-dot.off { background:var(--text-muted); }
+  .acct-btn.warn { border-color:var(--red); color:var(--red); }
+  .acct-btn.warn .acct-dot { margin-left:6px; }
 
   .acct-menu {
     display:none; position:absolute; right:0; top:calc(100% + 8px); z-index:120;
@@ -2636,6 +2638,22 @@ const SUPABASE_ANON_BUILTIN = 'sb_publishable_FaCe2Wfyru4YwVUdJxqRPw_aUZm8CNu';
 let sb = null, sbUser = null, syncTimer = null, syncPullTimer = null;
 let syncState = 'off';   // off | ready | syncing | error
 let syncLastAt = null, syncLastErr = '';
+let syncOffline = false;   // konfiguriert, aber der Dienst antwortet nicht
+
+/* Ein pausiertes Supabase-Projekt verliert seinen DNS-Eintrag: fetch scheitert
+   dann hart, statt einen Fehler zurueckzugeben. Das muss man erkennen koennen. */
+function isNetworkErr(e) {
+  const m = String((e && (e.message || e.name)) || '');
+  return /Failed to fetch|NetworkError|AuthRetryableFetch|Load failed|ERR_NAME_NOT_RESOLVED/i.test(m);
+}
+async function pingSync() {
+  const c = syncCfg();
+  if (!c.url || !c.key) return false;
+  try {
+    const r = await fetch(c.url + '/auth/v1/health', { headers: { apikey: c.key } });
+    return r.ok;
+  } catch (e) { return false; }
+}
 
 function syncCfg() {
   let c = {};
@@ -2652,12 +2670,14 @@ function setSyncState(st, err) {
 const ICON_USER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
 
 function syncLabel() {
+  if (syncOffline) return 'Sync-Dienst nicht erreichbar';
   if (!sbUser) return 'Nicht angemeldet';
   if (syncState === 'syncing') return 'Gleicht ab…';
   if (syncState === 'error')   return 'Abgleich fehlgeschlagen';
   return syncLastAt ? 'Abgeglichen ' + new Date(syncLastAt).toLocaleTimeString('de-DE', {hour:'2-digit',minute:'2-digit'}) : 'Verbunden';
 }
 function syncDotClass() {
+  if (syncOffline) return 'err';
   if (!sbUser) return 'off';
   if (syncState === 'syncing') return 'busy';
   if (syncState === 'error') return 'err';
@@ -2670,9 +2690,11 @@ function renderAcctButton() {
   const b = document.getElementById('acctBtn');
   if (!b) return;
   if (!sbUser) {
-    b.className = 'acct-btn';
-    b.innerHTML = ICON_USER + '<span class="acct-label">Anmelden</span>';
-    b.title = 'Anmelden, damit Laptop und Handy dieselbe Bibliothek teilen';
+    b.className = 'acct-btn' + (syncOffline ? ' warn' : '');
+    b.innerHTML = ICON_USER + '<span class="acct-label">Anmelden</span>' + (syncOffline ? '<span class="acct-dot err"></span>' : '');
+    b.title = syncOffline
+      ? 'Sync-Dienst nicht erreichbar - Anmelden geht gerade nicht. Deine Bibliothek auf diesem Geraet ist sicher.'
+      : 'Anmelden, damit Laptop und Handy dieselbe Bibliothek teilen';
   } else {
     const initial = (sbUser.email || '?').trim().charAt(0);
     b.className = 'acct-btn signed';
@@ -2760,6 +2782,10 @@ function renderAuthBody() {
       <h2 style="margin-bottom:5px;">Auf allen Geräten dieselbe Bibliothek</h2>
       <p class="modal-desc" style="margin-bottom:18px;">Melde dich mit deiner E-Mail an. Du bekommst einen Link — kein Passwort. Auf dem Handy dieselbe Adresse verwenden, dann ist alles sofort da.</p>
     </div>
+    ${syncOffline ? `<div class="auth-sent" style="display:block;margin-bottom:16px;border-color:var(--red);color:var(--red);">
+      <b>Der Sync-Dienst ist gerade nicht erreichbar.</b><br>
+      Anmelden funktioniert erst wieder, wenn er laeuft. Deine Bibliothek auf diesem Geraet bleibt davon voellig unberuehrt.
+    </div>` : ''}
     <div class="form-group">
       <label class="form-label">E-Mail</label>
       <input class="form-input" id="syncEmail" type="email" autocomplete="email" placeholder="du@example.com" onkeydown="if(event.key==='Enter')signIn()">
@@ -2782,23 +2808,33 @@ async function initSync() {
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
     const c = syncCfg();
     sb = createClient(c.url, c.key, { auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } });
-    const { data } = await sb.auth.getSession();
+    const { data, error: sessErr } = await sb.auth.getSession();
     sbUser = data && data.session ? data.session.user : null;
+    syncOffline = false;
+    if (!sbUser) {
+      /* Kein Konto geladen. Liegt das am fehlenden Login - oder daran, dass
+         das Projekt pausiert ist? Genau diese Verwechslung hat den Ausfall
+         im August 2026 drei Wochen lang unsichtbar gemacht. */
+      if ((sessErr && isNetworkErr(sessErr)) || !(await pingSync())) syncOffline = true;
+    }
     sb.auth.onAuthStateChange(async (_e, session) => {
       const was = sbUser && sbUser.id;
       sbUser = session ? session.user : null;
+      if (sbUser) syncOffline = false;
       renderAccount();
       if (sbUser && sbUser.id !== was) { closeAuthModal(); showToast('Angemeldet als ' + sbUser.email); await syncNow(true); }
       if (!sbUser) setSyncState('off');
     });
     renderAccount();
     if (sbUser) { await syncNow(true); startSyncLoops(); }
-    else setSyncState('off');
+    else setSyncState(syncOffline ? 'error' : 'off', syncOffline ? 'Sync-Dienst nicht erreichbar.' : '');
     // Magic-Link-Fragment aus der Adresszeile putzen
     if (location.hash.includes('access_token') || location.search.includes('code=')) history.replaceState(null, '', location.pathname);
   } catch (e) {
     console.error('Sync init:', e);
+    syncOffline = true;
     setSyncState('error', 'Verbindung zum Sync-Dienst fehlgeschlagen.');
+    renderAccount();
   }
 }
 
@@ -2851,11 +2887,28 @@ async function signIn() {
   if (!sb) { showToast('Sync ist noch nicht eingerichtet.'); return; }
   const btn = document.getElementById('syncSignInBtn');
   btn.disabled = true; btn.textContent = 'Wird gesendet…';
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
-  btn.disabled = false; btn.textContent = 'Anmeldelink senden';
-  if (error) { showToast('Fehler: ' + error.message); return; }
-  document.getElementById('syncSent').style.display = '';
-  document.getElementById('syncSentMail').textContent = email;
+  try {
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+    if (error) throw error;
+    syncOffline = false;
+    const sent = document.getElementById('syncSent');
+    if (sent) sent.style.display = '';
+    const sm = document.getElementById('syncSentMail');
+    if (sm) sm.textContent = email;
+  } catch (e) {
+    console.error('signIn:', e);
+    if (isNetworkErr(e)) {
+      syncOffline = true;
+      setSyncState('error', 'Sync-Dienst nicht erreichbar.');
+      showToast('Sync-Dienst nicht erreichbar. Deine Bibliothek auf diesem Geraet bleibt vollstaendig erhalten.');
+      renderAccount();
+    } else {
+      showToast('Anmeldung fehlgeschlagen: ' + ((e && e.message) || 'Unbekannter Fehler'));
+    }
+  } finally {
+    const b2 = document.getElementById('syncSignInBtn');
+    if (b2) { b2.disabled = false; b2.textContent = 'Anmeldelink senden'; }
+  }
 }
 
 async function signOut() {
@@ -2881,7 +2934,9 @@ function renderAccount() {
       <button class="btn btn-primary" onclick="closeDataModal();openAuthModal()">Einrichten</button>`;
   } else if (!sbUser) {
     box.innerHTML = `<div class="sync-row"><b>Nur auf diesem Gerät gespeichert</b></div>
-      <div class="form-hint" style="margin:6px 0 12px;">Melde dich an, damit Laptop und Handy dieselbe Bibliothek teilen.</div>
+      <div class="form-hint" style="margin:6px 0 12px;">${syncOffline
+        ? '<span style="color:var(--red);">Der Sync-Dienst antwortet gerade nicht.</span> Sobald er wieder läuft, meldet sich die App von selbst an. Deine Bibliothek hier bleibt vollständig erhalten.'
+        : 'Melde dich an, damit Laptop und Handy dieselbe Bibliothek teilen.'}</div>
       <button class="btn btn-primary" onclick="closeDataModal();openAuthModal()">Anmelden</button>`;
   } else {
     box.innerHTML = `<div class="sync-row"><b>Angemeldet als ${esc(sbUser.email)}</b></div>
