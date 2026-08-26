@@ -1,0 +1,41 @@
+name: Supabase keep-alive
+
+# Ein Supabase-Projekt im Gratis-Tarif pausiert nach ~7 Tagen ohne
+# Datenbank-Aktivitaet. Beim Pausieren verschwindet der DNS-Eintrag der
+# Projekt-URL - dann schlaegt jede Anmeldung mit "Failed to fetch" fehl.
+# Genau das ist am 06.08.2026 passiert und blieb drei Wochen unbemerkt.
+# Dieser Lauf stupst die Datenbank zweimal pro Woche an.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Montag  06:17 UTC
+    - cron: '17 6 * * 4'   # Donnerstag 06:17 UTC
+  workflow_dispatch:        # und jederzeit von Hand ausloesbar
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Datenbank und Auth anstupsen
+        env:
+          SUPABASE_URL: https://fdkerqdkrobupzqcfluk.supabase.co
+          SUPABASE_KEY: sb_publishable_FaCe2Wfyru4YwVUdJxqRPw_aUZm8CNu
+        run: |
+          set -u
+          # Der REST-Aufruf ist der wichtige: nur er weckt Postgres.
+          # RLS liefert fuer den anonymen Schluessel eine leere Liste - das
+          # genuegt, die Abfrage laeuft trotzdem durch die Datenbank.
+          rest=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            "$SUPABASE_URL/rest/v1/dt_state?select=user_id&limit=1")
+          health=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            -H "apikey: $SUPABASE_KEY" \
+            "$SUPABASE_URL/auth/v1/health")
+          echo "REST /dt_state : $rest"
+          echo "Auth /health   : $health"
+          if [ "$rest" != "200" ] || [ "$health" != "200" ]; then
+            echo "::error::Supabase antwortet nicht wie erwartet (rest=$rest health=$health) - Projekt evtl. pausiert oder geloescht."
+            exit 1
+          fi
+          echo "Projekt ist wach."
