@@ -1,0 +1,3 @@
+Automatisch vom Workflow "Supabase keep-alive" geschrieben.
+GitHub schaltet geplante Laeufe nach 60 Tagen ohne Commit ab.
+Letzter Stempel: 2026-10-23
