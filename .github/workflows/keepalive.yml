@@ -5,12 +5,26 @@ name: Supabase keep-alive
 # Projekt-URL - dann schlaegt jede Anmeldung mit "Failed to fetch" fehl.
 # Genau das ist am 06.08.2026 passiert und blieb drei Wochen unbemerkt.
 # Dieser Lauf stupst die Datenbank zweimal pro Woche an.
+#
+# Zweite Falle: GitHub schaltet geplante Laeufe ab, wenn das Repository
+# 60 Tage lang keinen Commit bekommt. Deshalb schreibt der Lauf ein
+# Datum nach .github/keepalive-stamp.txt, sobald der letzte Commit auf
+# main aelter als 45 Tage ist. Ein- und Ausschalten des Workflows ueber
+# die API reicht dafuer nicht - nur ein echter Commit setzt die Frist zurueck.
 
 on:
   schedule:
     - cron: '17 6 * * 1'   # Montag  06:17 UTC
     - cron: '17 6 * * 4'   # Donnerstag 06:17 UTC
   workflow_dispatch:        # und jederzeit von Hand ausloesbar
+    inputs:
+      force:
+        description: 'Datums-Commit sofort schreiben (setzt die 60-Tage-Frist zurueck)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write           # nur fuer den Datums-Commit
 
 jobs:
   ping:
@@ -39,3 +53,35 @@ jobs:
             exit 1
           fi
           echo "Projekt ist wach."
+
+      - name: Repository aktiv halten (60-Tage-Frist von GitHub)
+        if: always()          # auch wenn Supabase gerade nicht antwortet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.repository.default_branch || github.ref_name }}
+          FORCE: ${{ inputs.force && 'true' || 'false' }}
+          MAX_AGE_DAYS: '45'
+          STAMP: .github/keepalive-stamp.txt
+        run: |
+          set -euo pipefail
+          last=$(gh api "repos/$REPO/commits/$BRANCH" --jq '.commit.committer.date')
+          age=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 86400 ))
+          echo "Letzter Commit auf $BRANCH: $last ($age Tage her)"
+          if [ "$FORCE" != "true" ] && [ "$age" -lt "$MAX_AGE_DAYS" ]; then
+            echo "Noch unter $MAX_AGE_DAYS Tagen - kein Commit noetig."
+            exit 0
+          fi
+          today=$(date -u +%Y-%m-%d)
+          content=$(printf '%s\n%s\n%s\n' \
+            "Automatisch vom Workflow \"Supabase keep-alive\" geschrieben." \
+            "GitHub schaltet geplante Laeufe nach 60 Tagen ohne Commit ab." \
+            "Letzter Stempel: $today" | base64 -w0)
+          args=(-X PUT "repos/$REPO/contents/$STAMP"
+                -f message="Keep-alive: Repository aktiv halten ($today)"
+                -f content="$content"
+                -f branch="$BRANCH")
+          if sha=$(gh api "repos/$REPO/contents/$STAMP?ref=$BRANCH" --jq '.sha' 2>/dev/null); then
+            args+=(-f sha="$sha")
+          fi
+          gh api "${args[@]}" --jq '"Commit " + .commit.sha[0:7] + " geschrieben"'
