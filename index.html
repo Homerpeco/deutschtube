@@ -233,6 +233,20 @@
   }
   .notes-ta:focus { border-color:var(--accent-light); }
 
+  /* --- Shadowing-Modus --- */
+  .shadow-panel { display:none; border-top:1px solid var(--border); background:#fff; flex-shrink:0; padding:10px 18px 12px; font-style:normal; }
+  .shadow-on .shadow-panel { display:block; }
+  .shadow-on .notes-bar, .shadow-on #loopBtn { display:none; }
+  .sh-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; font-size:11.5px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.4px; }
+  .sh-keys { font-size:11px; font-weight:500; text-transform:none; letter-spacing:0; color:var(--text-muted); }
+  .sh-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; margin-top:8px; }
+  .sh-grp { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+  .sh-lbl { font-size:11.5px; font-weight:600; color:var(--text-muted); }
+  .sh-chip { font-family:ui-monospace,monospace; font-size:12px; font-weight:700; color:var(--text); background:var(--bg-input); border-radius:6px; padding:4px 8px; min-width:62px; text-align:center; }
+  .shadow-panel .btn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .shadow-panel .btn:disabled { opacity:.38; cursor:not-allowed; }
+  .sh-reps { font-size:13px; font-weight:800; color:var(--accent); min-width:30px; }
+
   /* --- stats view --- */
   .stats-scroll { flex:1; overflow-y:auto; padding:22px 26px 60px; }
   .stats-scroll::-webkit-scrollbar { width:9px; }
@@ -566,6 +580,10 @@
     .tab { font-size:11.5px; padding:9px 2px; }
     .bar-row { grid-template-columns:1fr 56px; }
   }
+  @media (max-width:860px) {
+    .shadow-panel { padding:10px 12px 12px; }
+    .shadow-panel .btn { min-height:36px; }
+  }
 </style>
 </head>
 <body>
@@ -669,6 +687,7 @@
         <span class="meta-badge" id="vibPlays" title="Wie oft du dieses Video gestartet hast"></span>
         <span class="meta-badge meta-status" id="vibStatus" onclick="cycleActiveStatus()" title="Klicken zum Wechseln"></span>
         <button class="btn btn-sm" id="loopBtn" onclick="toggleLoop()" title="Video wiederholen (Shadowing)">↻ Loop</button>
+        <button class="btn btn-sm" id="shadowBtn" onclick="toggleShadow()" title="Shadowing-Modus an/aus (U)">🗣 Shadowing</button>
       </div>
 
       <div class="player-wrapper" id="playerWrapper">
@@ -689,6 +708,39 @@
               <button class="autoplay-btn autoplay-now" onclick="autoplayNow()">▶ Jetzt abspielen</button>
               <button class="autoplay-btn" onclick="autoplayCancel()">✕ Abbrechen</button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="shadow-panel" id="shadowPanel">
+        <div class="sh-head">
+          <span>🗣 Shadowing</span>
+          <span class="sh-keys only-desktop"><span class="kbd">U</span> aus · <span class="kbd">A</span> Anfang · <span class="kbd">E</span> Ende · <span class="kbd">L</span> Loop · <span class="kbd">G</span> Pause · <span class="kbd">1</span>–<span class="kbd">4</span> Tempo · <span class="kbd">Leertaste</span> Play/Pause</span>
+        </div>
+        <div class="sh-row">
+          <div class="sh-grp">
+            <button class="btn btn-sm" onclick="shSetA()">Anfang setzen</button>
+            <span class="sh-chip" id="shA">A –</span>
+          </div>
+          <div class="sh-grp">
+            <button class="btn btn-sm" onclick="shSetE()">Ende setzen</button>
+            <span class="sh-chip" id="shE">E –</span>
+          </div>
+          <div class="sh-grp">
+            <button class="btn btn-sm" id="shLoopBtn" onclick="shToggleLoop()">↻ Loop</button>
+            <span class="sh-reps" id="shReps">0×</span>
+          </div>
+        </div>
+        <div class="sh-row">
+          <div class="sh-grp" id="shGaps">
+            <span class="sh-lbl">Pause danach</span>
+            <button class="btn btn-sm" data-gap="0" onclick="shSetGap(0)">0 s</button>
+            <button class="btn btn-sm" data-gap="1000" onclick="shSetGap(1000)">1 s</button>
+            <button class="btn btn-sm" data-gap="2000" onclick="shSetGap(2000)">2 s</button>
+            <button class="btn btn-sm" data-gap="3000" onclick="shSetGap(3000)">3 s</button>
+          </div>
+          <div class="sh-grp" id="shRates">
+            <span class="sh-lbl">Tempo</span>
           </div>
         </div>
       </div>
@@ -1376,6 +1428,7 @@ function setView(v) {
 
   if (radio) { renderStations(); updateRadioBar(); renderTranscript(); }
   if (v === 'stats') renderStats();
+  shSyncTimer();
 }
 
 /* =====================================================================
@@ -1434,6 +1487,7 @@ function playVideo(id) {
   if (currentStation && !radioEl().paused) { radioEl().pause(); updateRadioBar(); renderStations(); }
   activeVideoId = id;
   if (v.status === 'to-watch') v.status = 'in-progress';
+  shResetLoop(); shStopTimer();
   setView('player');
   closeMobileSidebar();
 
@@ -1451,12 +1505,14 @@ function playVideo(id) {
       videoId,
       playerVars: { autoplay:1, rel:0, modestbranding:1, origin:window.location.origin },
       events: {
-        onReady: startTicking,
+        onReady: () => { startTicking(); shOnReady(); },
+        onPlaybackRateChange: e => { shRt.rate = e.data; shRenderRates(); },
         onStateChange: e => {
           if (e.data !== 0) return;                // 0 = ENDED
           const vid = videos.find(x => x.id === activeVideoId);
           if (vid && vid.status !== 'watched') { vid.status = 'watched'; renderSidebar(); refreshInfoBar(); }
           flushSession();
+          if (sh().on) return;                     // Shadowing: weder Video-Loop noch Autoplay
           if (loopOn) { sessionCounted = false; try { ytPlayer.seekTo(0); ytPlayer.playVideo(); } catch {} return; }
           const next = getNextVideo(activeVideoId);
           if (next) startAutoplayCountdown(next);
@@ -1470,6 +1526,7 @@ function playVideo(id) {
 
   document.getElementById('notesTa').value = v.notes || '';
   refreshInfoBar();
+  applyShadowUI();
   saveData();
   renderSidebar();
   updateStats();
@@ -1493,6 +1550,183 @@ function refreshInfoBar() {
 }
 
 function toggleLoop() { loopOn = !loopOn; ui.loop = loopOn; saveData(); refreshInfoBar(); showToast(loopOn ? 'Loop an — Video wiederholt sich.' : 'Loop aus.'); }
+
+/* =====================================================================
+   SHADOWING — Phase 1: Modus, A–E-Loop mit Pause, Tempo
+   ===================================================================== */
+const SH_RATES_A = [0.75, 0.85, 1, 1.15], SH_RATES_B = [0.5, 0.75, 1, 1.25];
+const shRt = { a:null, b:null, loop:false, reps:0, inGap:false, gapTimer:null, timer:null,
+               lastSeek:0, avail:[], rates:SH_RATES_B, rate:1 };
+
+function sh() {                                   // Einstellungen (in ui, wird mitsynchronisiert)
+  const s = (ui.shadow && typeof ui.shadow === 'object') ? ui.shadow : (ui.shadow = {});
+  if (typeof s.on !== 'boolean') s.on = false;
+  if (![0,1000,2000,3000].includes(s.gapMs)) s.gapMs = 2000;
+  if (!Number.isFinite(s.rate)) s.rate = 1;
+  if (typeof s.blind !== 'boolean') s.blind = false;
+  return s;
+}
+function shReady() { return !!(activeVideoId && ytPlayer && typeof ytPlayer.getCurrentTime === 'function'); }
+function shNow() { try { return shReady() ? ytPlayer.getCurrentTime() : null; } catch { return null; } }
+function fmtT(sec) {
+  const n = Math.max(0, Math.round(sec * 10)), m = Math.floor(n / 600);
+  return m + ':' + ((n % 600) / 10).toFixed(1).padStart(4, '0');
+}
+
+function shResetLoop() {
+  clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
+  shRt.a = shRt.b = null; shRt.loop = false; shRt.reps = 0;
+}
+function shLoopOff() {
+  clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
+  shRt.loop = false; shRender();
+}
+function shSeekToA() {
+  shRt.lastSeek = performance.now();
+  try { ytPlayer.seekTo(Math.max(0, shRt.a - 0.15), true); } catch {}
+}
+
+/* 50-ms-Takt: nur aktiv, solange Shadowing an ist, ein Video läuft und der Player sichtbar ist */
+function shStopTimer() {
+  clearInterval(shRt.timer); shRt.timer = null;
+  clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
+}
+function shSyncTimer() {
+  const want = sh().on && !!activeVideoId && currentView === 'player';
+  if (want && !shRt.timer) shRt.timer = setInterval(shTick, 50);
+  else if (!want && shRt.timer) shStopTimer();
+}
+function shTick() {
+  if (!shReady() || !shRt.loop || shRt.a == null || shRt.b == null || shRt.inGap) return;
+  if (performance.now() - shRt.lastSeek < 400) return;          // Sprung noch nicht angekommen
+  let t, st;
+  try { t = ytPlayer.getCurrentTime(); st = ytPlayer.getPlayerState(); } catch { return; }
+  if (t < shRt.a - 1 || t > shRt.b + 1) { shLoopOff(); showToast('Loop aus'); return; }   // Leiste außerhalb gezogen
+  if (st !== 1 || t < shRt.b - 0.04) return;
+  shRt.reps++; shRenderReps();
+  const gap = sh().gapMs;
+  if (gap === 0) { shSeekToA(); return; }
+  try { ytPlayer.pauseVideo(); } catch {}
+  shRt.inGap = true;
+  shRt.gapTimer = setTimeout(() => {
+    shRt.gapTimer = null; shRt.inGap = false;
+    if (!shRt.loop || !shReady()) return;
+    shSeekToA(); try { ytPlayer.playVideo(); } catch {}
+  }, gap);
+}
+
+function shSetA() {
+  const t = shNow(); if (t == null) return;
+  shRt.a = t; shRt.reps = 0;
+  if (shRt.b != null && shRt.b < t + 0.5) { shRt.b = null; shLoopOff(); showToast('Ende zurückgesetzt — bitte neu setzen.'); }
+  shRender();
+}
+function shSetE() {
+  const t = shNow(); if (t == null) return;
+  if (shRt.a == null) { showToast('Zuerst den Anfang setzen.'); return; }
+  let dur = 0; try { dur = ytPlayer.getDuration() || 0; } catch {}
+  const e = dur > 0 ? Math.min(t, dur - 0.25) : t;
+  if (e <= shRt.a + 0.5) { showToast('Ende muss nach dem Anfang liegen.'); return; }
+  clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
+  shRt.b = e; shRt.reps = 0; shRt.loop = true; shRt.lastSeek = 0;
+  shRender();
+}
+function shToggleLoop() {
+  if (shRt.loop) { shLoopOff(); return; }
+  if (shRt.a == null || shRt.b == null) { showToast('Zuerst Anfang (A) und Ende (E) setzen.'); return; }
+  shRt.loop = true;
+  const t = shNow();
+  if (t != null && (t < shRt.a - 0.5 || t > shRt.b + 0.5)) { shSeekToA(); try { ytPlayer.playVideo(); } catch {} }
+  shRender();
+}
+function shPlayPause() {
+  if (!shReady()) return;
+  if (shRt.inGap) {                                           // Pause überspringen
+    clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
+    if (shRt.loop) { shSeekToA(); try { ytPlayer.playVideo(); } catch {} return; }
+  }
+  try { ytPlayer.getPlayerState() === 1 ? ytPlayer.pauseVideo() : ytPlayer.playVideo(); } catch {}
+}
+
+function shSetGap(ms) { sh().gapMs = ms; saveData(); shRenderGaps(); }
+function shCycleGap() { const g = [0,1000,2000,3000], i = g.indexOf(sh().gapMs); shSetGap(g[(i + 1) % g.length]); showToast('Pause danach: ' + (sh().gapMs / 1000) + ' s'); }
+
+/* Tempo */
+function shSetRate(r) {
+  if (!shReady() || !shRt.avail.includes(r)) return;
+  sh().rate = r; saveData();
+  try { ytPlayer.setPlaybackRate(r); } catch {}
+  shRt.rate = r; shRenderRates();
+}
+function shOnReady() {
+  try { shRt.avail = ytPlayer.getAvailablePlaybackRates() || []; } catch { shRt.avail = []; }
+  shRt.rates = (shRt.avail.includes(0.85) && shRt.avail.includes(1.15)) ? SH_RATES_A : SH_RATES_B;
+  if (sh().on) {
+    const r = shRt.rates.includes(sh().rate) && shRt.avail.includes(sh().rate) ? sh().rate : 1;
+    try { ytPlayer.setPlaybackRate(r); } catch {}
+  }
+  try { shRt.rate = ytPlayer.getPlaybackRate(); } catch { shRt.rate = 1; }
+  shRenderRates();
+  shSyncTimer();
+}
+
+/* Modus an/aus */
+function toggleShadow(force) {
+  if (!activeVideoId) return;
+  const s = sh();
+  s.on = typeof force === 'boolean' ? force : !s.on;
+  shResetLoop();
+  if (shReady()) {
+    try { ytPlayer.setPlaybackRate(s.on && shRt.avail.includes(s.rate) ? s.rate : 1); } catch {}
+  }
+  saveData();
+  applyShadowUI();
+  showToast(s.on ? 'Shadowing an.' : 'Shadowing aus — Notizen sind zurück.');
+}
+function applyShadowUI() {
+  const on = sh().on && !!activeVideoId;
+  document.getElementById('view-player').classList.toggle('shadow-on', on);
+  document.getElementById('shadowBtn').style.cssText = on ? 'background:var(--accent);color:#fff;border-color:var(--accent);' : '';
+  shRender();
+  shSyncTimer();
+}
+
+/* Anzeige */
+function shRenderReps() { document.getElementById('shReps').textContent = shRt.reps + '×'; }
+function shRenderGaps() {
+  document.querySelectorAll('#shGaps [data-gap]').forEach(b => b.classList.toggle('on', Number(b.dataset.gap) === sh().gapMs));
+}
+function shRenderRates() {
+  const box = document.getElementById('shRates');
+  box.querySelectorAll('button').forEach(b => b.remove());
+  shRt.rates.forEach((r, i) => {
+    const b = document.createElement('button');
+    b.className = 'btn btn-sm' + (Math.abs(r - shRt.rate) < 0.005 ? ' on' : '');
+    b.textContent = r + '×';
+    b.title = 'Taste ' + (i + 1);
+    b.disabled = !shRt.avail.includes(r);
+    b.onclick = () => shSetRate(r);
+    box.appendChild(b);
+  });
+}
+function shRender() {
+  document.getElementById('shA').textContent = 'A ' + (shRt.a == null ? '–' : fmtT(shRt.a));
+  document.getElementById('shE').textContent = 'E ' + (shRt.b == null ? '–' : fmtT(shRt.b));
+  document.getElementById('shLoopBtn').classList.toggle('on', shRt.loop);
+  shRenderReps(); shRenderGaps(); shRenderRates();
+}
+
+/* Tasten bleiben im Shadowing-Modus erreichbar: nach einem Klick ins YouTube-Fenster Fokus zurückholen */
+window.addEventListener('blur', () => {
+  if (!sh().on) return;
+  setTimeout(() => {
+    const f = document.activeElement;
+    if (f && f.tagName === 'IFRAME') { try { f.blur(); window.focus(); } catch {} }
+  }, 0);
+});
+document.getElementById('shadowPanel').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (b) b.blur();          // Leertaste darf keinen Knopf erneut auslösen
+});
 
 function cycleStatus(id) {
   const v = videos.find(x => x.id === id); if (!v) return;
@@ -2610,6 +2844,7 @@ function importData(ev) {
       mergeState(d);
     }
     saveData(true); renderSidebar(); renderStations(); updateStats(); if (currentView === 'stats') renderStats();
+    applyShadowUI();
     closeDataModal();
     showToast(merge ? 'Sicherung zusammengeführt.' : 'Sicherung eingelesen.');
   };
@@ -2622,7 +2857,7 @@ function resetAll() {
   stopRadio();
   const s = blankState();
   topics = s.topics; videos = []; stations = s.stations.map(normaliseStation); dailyC = {}; daily = {}; openTopics = {}; ui = {};
-  activeVideoId = null;
+  activeVideoId = null; shResetLoop(); applyShadowUI();
   saveData(true); renderSidebar(); renderStations(); updateStats(); closeDataModal();
   showToast('Zurückgesetzt. (Eine Rücksetz-Kopie liegt im Browser.)');
 }
@@ -3294,6 +3529,16 @@ document.addEventListener('keydown', e => {
   if (e.key === 's' || e.key === 'S') { e.preventDefault(); setView(currentView === 'stats' ? 'player' : 'stats'); return; }
   if (e.key === 'r' || e.key === 'R') { e.preventDefault(); setView(currentView === 'radio' ? 'player' : 'radio'); return; }
   if (e.code === 'Space' && currentView === 'radio') { e.preventDefault(); toggleRadio(); return; }
+  if (activeVideoId && currentView === 'player' && (e.key === 'u' || e.key === 'U')) { e.preventDefault(); toggleShadow(); return; }
+  if (activeVideoId && currentView === 'player' && sh().on) {
+    const k = e.key.toLowerCase();
+    if (k === 'a') { e.preventDefault(); shSetA(); return; }
+    if (k === 'e') { e.preventDefault(); shSetE(); return; }
+    if (k === 'l') { e.preventDefault(); shToggleLoop(); return; }
+    if (k === 'g') { e.preventDefault(); shCycleGap(); return; }
+    if (k >= '1' && k <= '4' && k.length === 1) { e.preventDefault(); const r = shRt.rates[Number(k) - 1]; if (r != null) shSetRate(r); return; }
+    if (e.code === 'Space') { e.preventDefault(); shPlayPause(); return; }
+  }
   if (e.key === 'b' || e.key === 'B') { if (activeVideoId) { e.preventDefault(); toggleBookmark(activeVideoId); } return; }
   if (e.key === 'h' || e.key === 'H') { if (activeVideoId) { e.preventDefault(); toggleHard(activeVideoId); } return; }
   if (e.key === 'j' || e.key === 'J') { const n = getNextVideo(activeVideoId); if (n) { e.preventDefault(); playVideo(n.id); } return; }
@@ -3314,6 +3559,7 @@ function init() {
   loadData();
   topics.forEach(t => { if (openTopics[t.id] === undefined) openTopics[t.id] = true; });
   saveData(true);           // Zustand sofort festschreiben — auch beim allerersten Start
+  applyShadowUI();
   renderSidebar();
   renderStations();
   updateStats();

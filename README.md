@@ -52,6 +52,19 @@ Teil des Lern-Ökosystems zusammen mit
 - Aktivitäts-Heatmap der letzten 26 Wochen, Streak und längste Serie
 - „Zu lange nicht angerührt“ — Themen für die nächste Wiederholung
 
+## Shadowing
+
+`🗣 Shadowing` in der Infoleiste (oder `U`) schaltet den Shadowing-Modus ein. Das Panel ersetzt
+die Notizleiste; beim Ausschalten kommen die Notizen unverändert zurück.
+
+- **A–E-Loop:** `A` setzt den Anfang auf die aktuelle Zeit, `E` das Ende und startet den Loop.
+  Nach jedem Durchlauf folgt eine Pause (0 / 1 / 2 / 3 s, Taste `G`); der Zähler zeigt die Durchläufe.
+  Zieht man die YouTube-Leiste weit aus dem Abschnitt heraus, geht der Loop aus.
+- **Tempo:** Tasten `1`–`4`. Angeboten werden 0,75 / 0,85 / 1 / 1,15× — gibt YouTube diese Stufen
+  nicht frei, stattdessen 0,5 / 0,75 / 1 / 1,25×.
+- Im Shadowing-Modus startet am Videoende weder der Video-Loop noch das automatische nächste Video.
+- Sprungungenauigkeit von YouTube: ca. 0,1–0,25 s — gut für Satzteile, nicht für einzelne Silben.
+
 ## Tastatur
 
 | Taste | Aktion |
@@ -65,6 +78,12 @@ Teil des Lern-Ökosystems zusammen mit
 | `J` / `K` | nächstes / vorheriges Video |
 | `B` | Merkliste |
 | `H` | als schwer markieren |
+| `U` | Shadowing ein / aus |
+| `A` / `E` | Shadowing: Anfang / Ende des Abschnitts setzen (E schaltet den Loop ein) |
+| `L` | Shadowing: Loop ein / aus |
+| `G` | Shadowing: Pause nach dem Abschnitt 0 → 1 → 2 → 3 s |
+| `1`–`4` | Shadowing: Tempo |
+| `Leertaste` | Shadowing: Video abspielen / pausieren (im Player-Tab) |
 | `Esc` | schließen |
 
 ## Betrieb
