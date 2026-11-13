@@ -44,11 +44,11 @@
   body {
     font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
     background:var(--bg); color:var(--text);
-    height:100vh; overflow:hidden; -webkit-font-smoothing:antialiased;
+    height:100vh; height:100dvh; overflow:hidden; -webkit-font-smoothing:antialiased;
   }
 
   /* ============ LAYOUT ============ */
-  .app { display:grid; grid-template-columns:320px 1fr; height:100vh; overflow:hidden; }
+  .app { display:grid; grid-template-columns:320px 1fr; height:100vh; height:100dvh; overflow:hidden; }
   .app.collapsed { grid-template-columns:0px 1fr; }
 
   /* ============ SIDEBAR ============ */
@@ -246,6 +246,7 @@
   .shadow-panel .btn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
   .shadow-panel .btn:disabled { opacity:.38; cursor:not-allowed; }
   .sh-reps { font-size:13px; font-weight:800; color:var(--accent); min-width:30px; }
+  .lbl-s { display:none; }
 
   /* --- stats view --- */
   .stats-scroll { flex:1; overflow-y:auto; padding:22px 26px 60px; }
@@ -583,6 +584,19 @@
   @media (max-width:860px) {
     .shadow-panel { padding:10px 12px 12px; }
     .shadow-panel .btn { min-height:36px; }
+
+    /* Shadowing auf dem Handy: Video bleibt oben stehen, das Panel scrollt darunter */
+    .shadow-on .player-wrapper { flex:none; width:100%; aspect-ratio:16/9; }
+    .shadow-on .shadow-panel { flex:1 1 auto; min-height:0; overflow-y:auto; }
+    .shadow-on .vib-title { flex:1 1 0; min-width:0; white-space:nowrap; }
+    .shadow-on #vibTopic, .shadow-on #vibPlays { display:none; }
+    body.sh-active .toolbar-actions { display:none; }
+    .shadow-panel .lbl-l, .shadow-panel .sh-ab { display:none; }
+    .shadow-panel .lbl-s { display:inline; }
+    .shadow-panel .sh-row { gap:8px 8px; }
+    .shadow-panel .sh-grp { gap:4px; }
+    .shadow-panel .sh-chip { min-width:0; padding:3px 6px; font-size:11.5px; }
+    .shadow-panel .sh-reps { min-width:22px; }
   }
 </style>
 </head>
@@ -719,12 +733,12 @@
         </div>
         <div class="sh-row">
           <div class="sh-grp">
-            <button class="btn btn-sm" onclick="shSetA()">Anfang setzen</button>
-            <span class="sh-chip" id="shA">A –</span>
+            <button class="btn btn-sm" onclick="shSetA()"><span class="lbl-l">Anfang setzen</span><span class="lbl-s">Anfang</span></button>
+            <span class="sh-chip" id="shA"><span class="sh-ab">A </span>–</span>
           </div>
           <div class="sh-grp">
-            <button class="btn btn-sm" onclick="shSetE()">Ende setzen</button>
-            <span class="sh-chip" id="shE">E –</span>
+            <button class="btn btn-sm" onclick="shSetE()"><span class="lbl-l">Ende setzen</span><span class="lbl-s">Ende</span></button>
+            <span class="sh-chip" id="shE"><span class="sh-ab">E </span>–</span>
           </div>
           <div class="sh-grp">
             <button class="btn btn-sm" id="shLoopBtn" onclick="shToggleLoop()">↻ Loop</button>
@@ -733,14 +747,14 @@
         </div>
         <div class="sh-row">
           <div class="sh-grp" id="shGaps">
-            <span class="sh-lbl">Pause danach</span>
+            <span class="sh-lbl"><span class="lbl-l">Pause danach</span><span class="lbl-s">Pause</span></span>
             <button class="btn btn-sm" data-gap="0" onclick="shSetGap(0)">0 s</button>
             <button class="btn btn-sm" data-gap="1000" onclick="shSetGap(1000)">1 s</button>
             <button class="btn btn-sm" data-gap="2000" onclick="shSetGap(2000)">2 s</button>
             <button class="btn btn-sm" data-gap="3000" onclick="shSetGap(3000)">3 s</button>
           </div>
           <div class="sh-grp" id="shRates">
-            <span class="sh-lbl">Tempo</span>
+            <span class="sh-lbl" id="shRateLbl">Tempo</span>
           </div>
         </div>
       </div>
@@ -1429,6 +1443,7 @@ function setView(v) {
   if (radio) { renderStations(); updateRadioBar(); renderTranscript(); }
   if (v === 'stats') renderStats();
   shSyncTimer();
+  shBodyClass();
 }
 
 /* =====================================================================
@@ -1487,7 +1502,7 @@ function playVideo(id) {
   if (currentStation && !radioEl().paused) { radioEl().pause(); updateRadioBar(); renderStations(); }
   activeVideoId = id;
   if (v.status === 'to-watch') v.status = 'in-progress';
-  shResetLoop(); shStopTimer();
+  shResetLoop(); shStopTimer(); shRt.avail = []; shRt.availKnown = false;
   setView('player');
   closeMobileSidebar();
 
@@ -1556,7 +1571,7 @@ function toggleLoop() { loopOn = !loopOn; ui.loop = loopOn; saveData(); refreshI
    ===================================================================== */
 const SH_RATES_A = [0.75, 0.85, 1, 1.15], SH_RATES_B = [0.5, 0.75, 1, 1.25];
 const shRt = { a:null, b:null, loop:false, reps:0, inGap:false, gapTimer:null, timer:null,
-               lastSeek:0, avail:[], rates:SH_RATES_B, rate:1 };
+               lastSeek:0, avail:[], availKnown:false, rates:SH_RATES_B, rate:1 };
 
 function sh() {                                   // Einstellungen (in ui, wird mitsynchronisiert)
   const s = (ui.shadow && typeof ui.shadow === 'object') ? ui.shadow : (ui.shadow = {});
@@ -1660,6 +1675,7 @@ function shSetRate(r) {
 }
 function shOnReady() {
   try { shRt.avail = ytPlayer.getAvailablePlaybackRates() || []; } catch { shRt.avail = []; }
+  shRt.availKnown = true;
   shRt.rates = (shRt.avail.includes(0.85) && shRt.avail.includes(1.15)) ? SH_RATES_A : SH_RATES_B;
   if (sh().on) {
     const r = shRt.rates.includes(sh().rate) && shRt.avail.includes(sh().rate) ? sh().rate : 1;
@@ -1683,10 +1699,12 @@ function toggleShadow(force) {
   applyShadowUI();
   showToast(s.on ? 'Shadowing an.' : 'Shadowing aus — Notizen sind zurück.');
 }
+function shBodyClass() { document.body.classList.toggle('sh-active', sh().on && !!activeVideoId && currentView === 'player'); }
 function applyShadowUI() {
   const on = sh().on && !!activeVideoId;
   document.getElementById('view-player').classList.toggle('shadow-on', on);
   document.getElementById('shadowBtn').style.cssText = on ? 'background:var(--accent);color:#fff;border-color:var(--accent);' : '';
+  shBodyClass();
   shRender();
   shSyncTimer();
 }
@@ -1699,6 +1717,9 @@ function shRenderGaps() {
 function shRenderRates() {
   const box = document.getElementById('shRates');
   box.querySelectorAll('button').forEach(b => b.remove());
+  const none = shRt.availKnown && !shRt.avail.some(r => r !== 1);     // YouTube bietet auf diesem Gerät nur 1×
+  document.getElementById('shRateLbl').textContent = none ? 'Tempo: auf diesem Gerät nicht verfügbar' : 'Tempo';
+  if (none) return;
   shRt.rates.forEach((r, i) => {
     const b = document.createElement('button');
     b.className = 'btn btn-sm' + (Math.abs(r - shRt.rate) < 0.005 ? ' on' : '');
@@ -1710,8 +1731,8 @@ function shRenderRates() {
   });
 }
 function shRender() {
-  document.getElementById('shA').textContent = 'A ' + (shRt.a == null ? '–' : fmtT(shRt.a));
-  document.getElementById('shE').textContent = 'E ' + (shRt.b == null ? '–' : fmtT(shRt.b));
+  document.getElementById('shA').innerHTML = '<span class="sh-ab">A </span>' + (shRt.a == null ? '–' : fmtT(shRt.a));
+  document.getElementById('shE').innerHTML = '<span class="sh-ab">E </span>' + (shRt.b == null ? '–' : fmtT(shRt.b));
   document.getElementById('shLoopBtn').classList.toggle('on', shRt.loop);
   shRenderReps(); shRenderGaps(); shRenderRates();
 }
