@@ -1585,6 +1585,7 @@ function playVideo(id) {
   flushSession();
   // Radio pausieren — nie zwei Tonquellen gleichzeitig
   if (currentStation && !radioEl().paused) { radioEl().pause(); updateRadioBar(); renderStations(); }
+  if (shRt.recording) shRecStop();                          // Aufnahme laeuft noch: sauber beenden (speichert sie beim alten Video, Ton zurueck)
   activeVideoId = id;
   if (v.status === 'to-watch') v.status = 'in-progress';
   shResetLoop(); shStopTimer(); shRt.avail = []; shRt.availKnown = false;
@@ -1597,6 +1598,7 @@ function playVideo(id) {
   if (ph) ph.style.display = 'none';
 
   function create(videoId) {
+    shUnmute();                                                // Sicherheitsnetz: nie stumm in ein neues Video
     const old = document.getElementById('ytFrame'); if (old) old.remove();
     if (ytPlayer) { try { ytPlayer.destroy(); } catch {} ytPlayer = null; }
     const div = document.createElement('div');
@@ -1608,7 +1610,7 @@ function playVideo(id) {
       videoId,
       playerVars: { autoplay:1, rel:0, modestbranding:1, origin:window.location.origin },
       events: {
-        onReady: () => { startTicking(); shOnReady(); },
+        onReady: () => { shUnmute(); startTicking(); shOnReady(); },
         onPlaybackRateChange: e => { shRt.rate = e.data; shRenderRates(); },
         onStateChange: e => {
           if (e.data !== 0) return;                // 0 = ENDED
@@ -1662,7 +1664,7 @@ const shRt = { a:null, b:null, loop:false, reps:0, inGap:false, gapTimer:null, t
                lastSeek:0, avail:[], availKnown:false, rates:SH_RATES_B, rate:1,
                dur:0, dragging:false, sliderSeekAt:0, sliderTrail:null, pos:-1, fine:'a', sheet:false,
                slDown:false, slWasPlaying:false, slHold:null, stepPos:null, stepAt:0, cmp:null, recording:false, recHold:false, mHeld:false, mic:null, micPending:false,
-               recMr:null, recT0:0, recTick:null, hold:false };
+               recMr:null, recT0:0, recTick:null, hold:false, recPlay:false, recEnd:0, recMax:30000, mutedByRec:false };
 const shSegs = {};          // "Letzte Abschnitte": YouTube-Video-ID -> [{a, e, blob, mime, at}] (neueste zuerst, max. 5); Kopie auf dem Geraet in IndexedDB (nie localStorage, Export oder Sync)
 
 function sh() {                                   // Einstellungen (in ui, wird mitsynchronisiert)
@@ -1676,6 +1678,12 @@ function sh() {                                   // Einstellungen (in ui, wird 
 }
 function shReady() { return !!(activeVideoId && ytPlayer && typeof ytPlayer.getCurrentTime === 'function'); }
 function shNow() { try { return shReady() ? ytPlayer.getCurrentTime() : null; } catch { return null; } }
+/* Ton: waehrend der Aufnahme ist das Video stumm. Merker "von der Aufnahme stumm geschaltet" -
+   wird vor jeder Wiedergabe, jedem Sprung und bei jedem neuen Player zurueckgenommen. */
+function shUnmute() {
+  if (!shRt.mutedByRec) return;
+  if (ytPlayer && typeof ytPlayer.unMute === 'function') { try { ytPlayer.unMute(); shRt.mutedByRec = false; } catch {} }
+}
 function fmtT(sec) {                              // Marker: eine Dezimale, ab 1 Stunde h:mm:ss.t
   const n = Math.max(0, Math.round(sec * 10)), tot = Math.floor(n / 10), tenth = n % 10;
   const h = Math.floor(tot / 3600), m = Math.floor(tot % 3600 / 60), sc = tot % 60;
@@ -1697,6 +1705,7 @@ function shLoopOff() {
   shRt.loop = false; shRender();
 }
 function shSeekToA() {
+  if (!shRt.recording) shUnmute();
   shRt.lastSeek = performance.now();
   try { ytPlayer.seekTo(Math.max(0, shRt.a - 0.15), true); } catch {}
 }
@@ -1717,6 +1726,10 @@ function shTick() {
   try { t = ytPlayer.getCurrentTime(); st = ytPlayer.getPlayerState(); } catch { return; }
   shUpdatePos(t);
   shRenderPlayIcon(st);
+  if (shRt.recording && shRt.recPlay && performance.now() - shRt.lastSeek >= 400) {   // Aufnahme laeuft: nur Ende beobachten
+    if (st === 0) shRt.recPlay = false;
+    else if (st === 1 && t >= shRt.recEnd - 0.04) { try { ytPlayer.pauseVideo(); } catch {} shRt.recPlay = false; }   // bleibt auf dem Bild stehen
+  }
   if (shRt.hold) return;                                        // Aufnahme laeuft: Loop-Takt ruht
   if (!shRt.loop || shRt.a == null || shRt.b == null || shRt.inGap) return;
   if (performance.now() - shRt.lastSeek < 400) return;          // Sprung noch nicht angekommen
@@ -1776,6 +1789,7 @@ function shRenderBand() {
   band.style.width = 'calc((100% - var(--thumb)) * ' + Math.max(0, fb - fa) + ')';
 }
 function shSliderSeek(v, accurate) {                                             // jeder Sprung haelt danach das Ziel (1,5 s / 0,75 s)
+  shUnmute();
   shRt.lastSeek = shRt.sliderSeekAt = performance.now();
   shRt.slHold = { v, until: performance.now() + 1500 };
   try { ytPlayer.seekTo(v, !!accurate); } catch {}
@@ -1787,6 +1801,7 @@ function shSeekThrottled(v, accurate) {                                         
   else shRt.sliderTrail = setTimeout(() => shSliderSeek(v, accurate), wait);
 }
 function shSliderDragStart() {                                                   // erstes input-Ereignis: Video anhalten, Pause/Vergleich abbrechen
+  shUnmute();
   shRt.dragging = true; shRt.stepPos = null;
   try { const st = ytPlayer.getPlayerState(); shRt.slWasPlaying = (st === 1 || st === 3); if (shRt.slWasPlaying) ytPlayer.pauseVideo(); } catch { shRt.slWasPlaying = false; }
   clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
@@ -1815,6 +1830,7 @@ function shSliderCommit() {                                                     
 /* Pfeiltasten: Position in 0,1-s-Schritten (Umschalt: 1 s); Video bleibt pausiert und zeigt das Bild */
 function shStepPos(delta) {
   if (!shReady() || shRt.hold || !shRt.dur) return;
+  shUnmute();
   shSliderCommit();
   shCancelCompare(true);
   clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
@@ -1844,6 +1860,7 @@ function shStepPos(delta) {
 function shFine(which) { shRt.fine = which; shRender(); }
 function shNudge(d) {
   if (!shReady() || shRt.hold) return;
+  shUnmute();
   const which = shRt.fine;
   shCancelCompare(false);
   clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
@@ -1896,6 +1913,7 @@ function shToggleLoop() {
 }
 function shPlayPause() {
   if (!shReady() || shRt.hold) return;
+  shUnmute();
   if (shRt.cmp) { shCancelCompare(true); try { ytPlayer.pauseVideo(); } catch {} return; }
   if (shRt.inGap) {                                           // Pause überspringen
     clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
@@ -1907,6 +1925,7 @@ function shPlayPause() {
 /* Nochmal: sofort von Anfang an */
 function shAgain() {
   if (!shReady() || shRt.hold || shRt.a == null) return;
+  shUnmute();
   shCancelCompare(false);
   clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
   shSeekToA(); try { ytPlayer.playVideo(); } catch {}
@@ -1914,6 +1933,7 @@ function shAgain() {
 /* Weiter: naechster Abschnitt gleicher Laenge direkt hinter dem Ende */
 function shNext() {
   if (!shReady() || shRt.hold || shRt.a == null || shRt.b == null) return;
+  shUnmute();
   let dur = shRt.dur; try { dur = ytPlayer.getDuration() || dur; } catch {}
   const len = shRt.b - shRt.a, na = shRt.b;
   let nb = na + len; if (dur > 0) nb = Math.min(nb, dur - 0.25);
@@ -2195,6 +2215,7 @@ function shRenderSegs() {
 function shSegLoad(i) {                                        // Chip: Marker setzen, zu Anfang springen, pausiert bleiben
   const x = shSegList()[i];
   if (!x || shRt.hold || !shReady()) return;
+  shUnmute();
   shCancelCompare(false);
   clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
   shRt.a = x.a; shRt.b = x.e; shRt.reps = 0; shRt.fine = 'e'; shRt.loop = true;
@@ -2218,8 +2239,9 @@ async function shRecStart(hold) {
   if (shRt.recording || shRt.micPending || !shReady()) return;
   if (shRt.a == null || shRt.b == null) { showToast('Zuerst Anfang und Ende setzen.'); return; }
   shCancelCompare(false);
+  shUnmute();                                                   // Rest einer frueheren Aufnahme: Ton zuerst zurueck, damit isMuted() stimmt
   shRt.recHold = !!hold;
-  shHoldOn();                                                   // Pause-Timer weg, Video pausieren, Loop-Takt ruht
+  shHoldOn();                                                   // Pause-Timer weg, Video pausieren, Loop-Takt ruht (waehrend die Mikrofon-Abfrage laeuft)
   shRt.micPending = true; shRenderRec();
   let stream;
   try { stream = await shMicGet(); }
@@ -2240,6 +2262,15 @@ async function shRecStart(hold) {
   try { mr = mime ? new MediaRecorder(stream, { mimeType:mime }) : new MediaRecorder(stream); }
   catch { shRt.hold = false; showToast('Aufnahme wird von diesem Browser nicht unterstützt.'); shRenderRec(); return; }
   const chunks = [], vid = shYt(), ra = shRt.a, rb = shRt.b, t0 = performance.now();
+  /* Erst wenn der Recorder wirklich laeuft (auch nach einer ersten Mikrofon-Abfrage): Video stumm, zu Anfang, abspielen */
+  mr.onstart = () => {
+    if (!shRt.recording || shRt.recMr !== mr || !shReady()) return;
+    let wasMuted = false; try { wasMuted = !!ytPlayer.isMuted(); } catch {}
+    if (!wasMuted) { try { ytPlayer.mute(); shRt.mutedByRec = true; } catch {} }
+    shRt.lastSeek = performance.now();
+    try { ytPlayer.seekTo(Math.max(0, ra - 0.15), true); ytPlayer.playVideo(); shRt.recPlay = true; } catch {}
+  };
+  mr.onerror = () => { if (shRt.recMr === mr) { shRecStop(); showToast('Aufnahme fehlgeschlagen.'); } };
   mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   mr.onstop = () => {
     if (performance.now() - t0 < 400) { showToast('Zu kurz — nicht gespeichert.'); return; }
@@ -2248,11 +2279,13 @@ async function shRecStart(hold) {
     showToast('Aufnahme gespeichert.'); shRenderSegs(); shRenderRec();
     blob.arrayBuffer().then(buf => shDbWrite(vid, ra, rb, buf, blob.type, at)).catch(shDbFail);   // ... dann auf dem Geraet
   };
-  shRt.recMr = mr; shRt.recT0 = t0; shRt.recording = true;
-  mr.start();
+  shRt.recMr = mr; shRt.recT0 = t0; shRt.recording = true; shRt.recPlay = false; shRt.recEnd = rb;
+  shRt.recMax = Math.min(120000, Math.max(30000, ((rb - ra) / Math.max(0.25, shRt.rate) + 10) * 1000));   // max(30 s, Abschnitt / Tempo + 10 s), hoechstens 120 s
+  try { mr.start(); }
+  catch { shRt.recording = false; shRt.recMr = null; shRt.hold = false; showToast('Aufnahme konnte nicht gestartet werden.'); shRenderRec(); return; }
   clearInterval(shRt.recTick);
   shRt.recTick = setInterval(() => {
-    if (performance.now() - shRt.recT0 >= 30000) { shRecStop(); showToast('Aufnahme beendet (30 s).'); }
+    if (performance.now() - shRt.recT0 >= shRt.recMax) { shRecStop(); showToast('Aufnahme beendet (' + Math.round(shRt.recMax / 1000) + ' s).'); }
     else shRenderRec();
   }, 250);
   shRenderRec();
@@ -2265,8 +2298,10 @@ function shHoldOn() {
 }
 function shRecStop() {
   if (!shRt.recording) return;
-  shRt.recording = false; shRt.hold = false; clearInterval(shRt.recTick); shRt.recTick = null;      // danach bleibt das Video pausiert
+  shRt.recording = false; shRt.recPlay = false; shRt.hold = false; clearInterval(shRt.recTick); shRt.recTick = null;
   try { shRt.recMr.stop(); } catch {}
+  try { ytPlayer.pauseVideo(); } catch {}                       // danach bleibt das Video pausiert ...
+  shUnmute();                                                   // ... und der Ton ist zurueck (nur wenn die Aufnahme ihn abgeschaltet hat)
   shRenderRec();
 }
 function shRenderCtl() {                                           // gesperrt, solange aufgenommen wird
@@ -2309,6 +2344,7 @@ function shCancelCompare(restoreLoop) {
 function shCompare() {
   if (shRt.cmp) { shCancelCompare(true); try { ytPlayer.pauseVideo(); } catch {} return; }
   if (shRt.recording || shRt.hold || !shReady()) return;
+  shUnmute();
   if (shRt.a == null || shRt.b == null) { showToast('Zuerst Anfang und Ende setzen.'); return; }
   const ent = shSegFind(shRt.a, shRt.b);
   if (!ent) { showToast('Erst aufnehmen, dann vergleichen.'); return; }
@@ -4175,6 +4211,7 @@ document.addEventListener('keyup', e => {                        // M loslassen 
   if (shRt.recording && shRt.recHold) shRecStop();
 });
 window.addEventListener('blur', () => { shRt.mHeld = false; if (shRt.recording && shRt.recHold) shRecStop(); });
+window.addEventListener('pagehide', () => { try { if (shRt.recording) shRecStop(); else shUnmute(); } catch {} });   // Tab schliessen mitten in der Aufnahme: Ton nicht stumm zuruecklassen
 window.addEventListener('beforeunload', flushSession);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) flushSession();
