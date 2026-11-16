@@ -271,7 +271,8 @@
   .sh-track { position:relative; height:32px; --thumb:28px; }
   .sh-track::before { content:''; position:absolute; left:0; right:0; top:50%; height:6px; margin-top:-3px; border-radius:3px; background:var(--border); }
   .sh-band { position:absolute; top:50%; height:6px; margin-top:-3px; border-radius:3px; background:rgba(139,92,246,.4); display:none; }
-  .sh-slider { -webkit-appearance:none; appearance:none; position:relative; z-index:1; width:100%; height:32px; margin:0; background:transparent; cursor:pointer; touch-action:pan-y; }
+  .sh-slider { -webkit-appearance:none; appearance:none; position:relative; z-index:1; width:100%; height:32px; margin:0; background:transparent; cursor:pointer; touch-action:none; }
+  .sh-slider:disabled { opacity:.45; cursor:not-allowed; }
   .sh-slider::-webkit-slider-runnable-track { height:6px; background:transparent; border-radius:3px; }
   .sh-slider::-moz-range-track { height:6px; background:transparent; border-radius:3px; }
   .sh-slider::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:28px; height:28px; margin-top:-11px; border-radius:50%; background:var(--accent); border:3px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.35); }
@@ -295,6 +296,13 @@
   #shPlayBtn .i-pause { display:none; }
   #shPlayBtn.playing .i-pause { display:block; }
   #shPlayBtn.playing .i-play { display:none; }
+  .sh-segs { display:none; }
+  .sh-segs.on { display:block; }
+  .sh-segs-l { font-size:11.5px; font-weight:700; color:var(--text-muted); margin-bottom:6px; }
+  .sh-segs-c { display:flex; flex-wrap:wrap; gap:6px; }
+  .sh-segchip { min-height:40px; padding:0 12px; font-family:inherit; font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; color:var(--text-dim); background:#fff; border:1px solid var(--border); border-radius:12px; cursor:pointer; white-space:nowrap; }
+  .sh-segchip.cur { border-color:var(--accent); color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .sh-segchip:disabled { opacity:.45; cursor:not-allowed; }
   .sh-rec { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .sh-recbtn { height:52px; font-family:inherit; font-size:15px; font-weight:700; color:var(--text-dim); background:#fff; border:1px solid var(--border); border-radius:12px; cursor:pointer; font-variant-numeric:tabular-nums; }
   .sh-recbtn:disabled { opacity:.5; cursor:wait; }
@@ -304,7 +312,7 @@
   @keyframes shpulse { 0%,100% { opacity:1; } 50% { opacity:.72; } }
   @media (min-width:861px) {
     .sh-body { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; }
-    .sh-top, .sh-sheet, .sh-pos { grid-column:1 / -1; }
+    .sh-top, .sh-sheet, .sh-pos, .sh-segs { grid-column:1 / -1; }
     .sh-sheet .sh-seg { max-width:440px; }
   }
 
@@ -798,7 +806,7 @@
             <div class="sh-swrow"><span>YouTube-Bedienelemente ausblenden</span><button class="sh-switch" id="shCropSw" role="switch" aria-checked="false" aria-label="YouTube-Bedienelemente ausblenden" onclick="shToggleCrop()"></button></div>
             <div class="sh-swnote">Blendet auch YouTube-Untertitel aus.</div>
             <div class="sh-keys only-desktop">
-              <span class="kbd">U</span> Shadowing aus · <span class="kbd">A</span> Anfang · <span class="kbd">E</span> Ende · <span class="kbd">L</span> Loop · <span class="kbd">G</span> Pause · <span class="kbd">1</span>–<span class="kbd">4</span> Tempo · <span class="kbd">Leertaste</span> Play/Pause · <span class="kbd">M</span> halten = Aufnehmen · <span class="kbd">P</span> Vergleichen
+              <span class="kbd">U</span> Shadowing aus · <span class="kbd">A</span> Anfang · <span class="kbd">E</span> Ende · <span class="kbd">L</span> Loop · <span class="kbd">G</span> Pause · <span class="kbd">1</span>–<span class="kbd">4</span> Tempo · <span class="kbd">Leertaste</span> Play/Pause · <span class="kbd">←</span> <span class="kbd">→</span> Position ±0,1 s (<span class="kbd">Umschalt</span> ±1 s) · <span class="kbd">M</span> halten = Aufnehmen · <span class="kbd">P</span> Vergleichen
             </div>
           </div>
           <div class="sh-pos" id="shPos">
@@ -825,6 +833,10 @@
           <div class="sh-rec">
             <button class="sh-recbtn" id="shRecBtn" onclick="shRecToggle()">● Aufnehmen</button>
             <button class="sh-recbtn" id="shCmpBtn" onclick="shCompare()">▶ Vergleichen</button>
+          </div>
+          <div class="sh-segs" id="shSegs">
+            <div class="sh-segs-l">Letzte Abschnitte</div>
+            <div class="sh-segs-c" id="shSegChips"></div>
           </div>
         </div>
       </div>
@@ -1646,9 +1658,9 @@ const SH_RATES_A = [0.75, 0.85, 1, 1.15], SH_RATES_B = [0.5, 0.75, 1, 1.25];
 const shRt = { a:null, b:null, loop:false, reps:0, inGap:false, gapTimer:null, timer:null,
                lastSeek:0, avail:[], availKnown:false, rates:SH_RATES_B, rate:1,
                dur:0, dragging:false, sliderSeekAt:0, sliderTrail:null, pos:-1, fine:'a', sheet:false,
-               cmp:null, recording:false, recHold:false, mHeld:false, mic:null, micPending:false,
+               slDown:false, slWasPlaying:false, slHold:null, stepPos:null, stepAt:0, cmp:null, recording:false, recHold:false, mHeld:false, mic:null, micPending:false,
                recMr:null, recT0:0, recTick:null, hold:false };
-const shRecs = {};          // Aufnahmen nur im Arbeitsspeicher: Schluessel Video@A-E -> [Blob, ...] (max. 5); nie gespeichert
+const shSegs = {};          // "Letzte Abschnitte": nur im Arbeitsspeicher, Video-ID -> [{a, e, blob}] (neueste zuerst, max. 5); nie gespeichert
 
 function sh() {                                   // Einstellungen (in ui, wird mitsynchronisiert)
   const s = (ui.shadow && typeof ui.shadow === 'object') ? ui.shadow : (ui.shadow = {});
@@ -1720,6 +1732,15 @@ function shTick() {
 }
 
 /* Positions-Regler fuer das ganze Video */
+const shMQ = window.matchMedia('(min-width:861px)');
+function shTenths() { return shMQ.matches; }                                   // Zehntel nur am PC, auf dem Handy ganze Sekunden
+function fmtPos(t) { return shTenths() ? fmtT(t) : fmtClock(t); }
+function shApplyTenths() {
+  document.getElementById('shSlider').step = shTenths() ? 0.1 : 1;
+  shRt.pos = -1; shRt.slHold = null;
+  shRenderReadout(shRt.dur ? Math.min(Number(document.getElementById('shSlider').value) || 0, shRt.dur) : 0);
+  shRender();
+}
 function shUpdatePos(t) {
   let d = 0; try { d = ytPlayer.getDuration() || 0; } catch {}
   if (d > 0 && d !== shRt.dur) {
@@ -1728,13 +1749,21 @@ function shUpdatePos(t) {
     document.getElementById('shPos').classList.add('on');
     shRenderBand();
   }
-  if (!shRt.dur || shRt.dragging) return;
+  if (!shRt.dur || shRt.slDown || shRt.dragging) return;
+  const sl = document.getElementById('shSlider'), hold = shRt.slHold;
+  if (shRt.stepPos != null && performance.now() - shRt.stepAt < 300) {            // Pfeiltasten gedrueckt gehalten: Ziel zeigen
+    if (shRt.pos !== shRt.stepPos) { shRt.pos = shRt.stepPos; sl.value = shRt.stepPos; shRenderReadout(shRt.stepPos); }
+    return;
+  }
+  if (hold) {                                                                    // Ziel halten, bis der Player dort angekommen ist
+    if (Math.abs(t - hold.v) <= 0.75 || performance.now() > hold.until) shRt.slHold = null;
+    else { if (shRt.pos !== hold.v) { shRt.pos = hold.v; sl.value = hold.v; shRenderReadout(hold.v); } return; }
+  }
   if (Math.abs(t - shRt.pos) < 0.05) return;
-  shRt.pos = t;
-  document.getElementById('shSlider').value = t;
+  shRt.pos = t; sl.value = t;
   shRenderReadout(t);
 }
-function shRenderReadout(t) { document.getElementById('shReadout').textContent = fmtClock(t) + ' / ' + fmtClock(shRt.dur); }
+function shRenderReadout(t) { document.getElementById('shReadout').textContent = fmtPos(t) + ' / ' + fmtClock(shRt.dur); }
 function shRenderBand() {
   const band = document.getElementById('shBand'), d = shRt.dur;
   if (!d || shRt.a == null || shRt.b == null) { band.style.display = 'none'; return; }
@@ -1743,36 +1772,69 @@ function shRenderBand() {
   band.style.left = 'calc(var(--thumb) / 2 + (100% - var(--thumb)) * ' + fa + ')';
   band.style.width = 'calc((100% - var(--thumb)) * ' + Math.max(0, fb - fa) + ')';
 }
-function shSliderSeek(v) {
+function shSliderSeek(v, accurate) {                                             // jeder Sprung haelt danach das Ziel (1,5 s / 0,75 s)
   shRt.lastSeek = shRt.sliderSeekAt = performance.now();
-  try { ytPlayer.seekTo(v, true); } catch {}
+  shRt.slHold = { v, until: performance.now() + 1500 };
+  try { ytPlayer.seekTo(v, !!accurate); } catch {}
+}
+function shSeekThrottled(v, accurate) {                                          // hoechstens ein Sprung alle ~150 ms, am Ende der letzte
+  clearTimeout(shRt.sliderTrail);
+  const wait = 150 - (performance.now() - shRt.sliderSeekAt);
+  if (wait <= 0) shSliderSeek(v, accurate);
+  else shRt.sliderTrail = setTimeout(() => shSliderSeek(v, accurate), wait);
+}
+function shSliderDragStart() {                                                   // erstes input-Ereignis: Video anhalten, Pause/Vergleich abbrechen
+  shRt.dragging = true; shRt.stepPos = null;
+  try { const st = ytPlayer.getPlayerState(); shRt.slWasPlaying = (st === 1 || st === 3); if (shRt.slWasPlaying) ytPlayer.pauseVideo(); } catch { shRt.slWasPlaying = false; }
+  clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
+  shCancelCompare(true);
 }
 function shSliderInput() {
-  if (!shReady()) return;
+  if (!shReady() || shRt.hold) return;
   const v = Number(document.getElementById('shSlider').value);
-  shRt.dragging = true; shRt.pos = v;
+  if (!shRt.dragging) shSliderDragStart();
+  shRt.pos = v;
   shRenderReadout(v);
-  clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;       // Pause nach dem Abschnitt abbrechen
   if (shRt.loop && shRt.a != null && shRt.b != null && (v < shRt.a - 1 || v > shRt.b + 1)) { shLoopOff(); showToast('Loop aus'); }
-  const wait = 150 - (performance.now() - shRt.sliderSeekAt);                  // Sprünge drosseln (~alle 150 ms)
-  clearTimeout(shRt.sliderTrail);
-  if (wait <= 0) shSliderSeek(v);
-  else shRt.sliderTrail = setTimeout(() => shSliderSeek(Number(document.getElementById('shSlider').value)), wait);
+  shSeekThrottled(v, false);                                                     // waehrend des Ziehens ungenau, aber fluessig
 }
-function shSliderCommit() {                                                    // Loslassen: letzter Sprung
-  if (!shRt.dragging) return;
-  clearTimeout(shRt.sliderTrail);
-  shSliderSeek(Number(document.getElementById('shSlider').value));
+function shSliderCommit() {                                                      // Loslassen
+  shRt.slDown = false;
+  if (!shRt.dragging) return;                                                    // nur wenn wirklich gezogen wurde
   shRt.dragging = false;
-  document.getElementById('shSlider').blur();                                  // damit die Tasten wieder gehen
+  clearTimeout(shRt.sliderTrail);
+  const v = Number(document.getElementById('shSlider').value);
+  shSliderSeek(v, true);                                                         // ein genauer Sprung
+  if (shRt.slWasPlaying) { try { ytPlayer.playVideo(); } catch {} }              // nur weiter, wenn es vorher lief
+  shRt.slWasPlaying = false;
+  document.getElementById('shSlider').blur();                                    // damit die Tasten wieder gehen
+}
+/* Pfeiltasten: Position in 0,1-s-Schritten (Umschalt: 1 s); Video bleibt pausiert und zeigt das Bild */
+function shStepPos(delta) {
+  if (!shReady() || shRt.hold || !shRt.dur) return;
+  shSliderCommit();
+  shCancelCompare(true);
+  clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
+  const now = performance.now();
+  const base = (shRt.stepPos != null && now - shRt.stepAt < 1500) ? shRt.stepPos : (shRt.slHold ? shRt.slHold.v : (shNow() || 0));
+  const v = Math.round(Math.min(Math.max(0, base + delta), Math.max(0, shRt.dur - 0.05)) * 10) / 10;
+  try { ytPlayer.pauseVideo(); } catch {}
+  shRt.stepPos = v; shRt.stepAt = now;
+  shRt.pos = v; shRt.slHold = { v, until: now + 1500 };
+  document.getElementById('shSlider').value = v; shRenderReadout(v);
+  if (shRt.loop && shRt.a != null && shRt.b != null && (v < shRt.a - 1 || v > shRt.b + 1)) { shLoopOff(); showToast('Loop aus'); }
+  shSeekThrottled(v, true);
 }
 (function initShSlider() {
   const sl = document.getElementById('shSlider');
-  sl.addEventListener('pointerdown', () => { shRt.dragging = true; });
+  sl.addEventListener('pointerdown', () => { shRt.slDown = true; });
   sl.addEventListener('input', shSliderInput);
   sl.addEventListener('change', shSliderCommit);
   window.addEventListener('pointerup', shSliderCommit);
   window.addEventListener('pointercancel', shSliderCommit);
+  const onMQ = () => shApplyTenths();
+  if (shMQ.addEventListener) shMQ.addEventListener('change', onMQ); else if (shMQ.addListener) shMQ.addListener(onMQ);
+  sl.step = shTenths() ? 0.1 : 1;
 })();
 
 /* Feinschritte: bewegen den Marker, den der Schalter [A | E] waehlt */
@@ -1944,7 +2006,7 @@ function shRender() {
   document.querySelectorAll('#shFineSw button').forEach(b => b.classList.toggle('on', b.dataset.m === shRt.fine));
   shRenderCtl();
   shRenderBand();
-  shRenderReps(); shRenderGaps(); shRenderRates(); shRenderRec();
+  shRenderReps(); shRenderGaps(); shRenderRates(); shRenderSegs(); shRenderRec();
 }
 
 /* Einstellungs-Blatt (Pause + Tempo): Chip antippen oeffnet es direkt unter der Zeile */
@@ -1966,9 +2028,39 @@ document.addEventListener('click', e => {
 });
 
 /* ---------- Aufnahme (nur Arbeitsspeicher) ---------- */
-function shRecKey() {
-  const v = videos.find(x => x.id === activeVideoId);
-  return (v ? v.videoId : '?') + '@' + (shRt.a == null ? '-' : shRt.a.toFixed(1)) + '-' + (shRt.b == null ? '-' : shRt.b.toFixed(1));
+/* Letzte Abschnitte: pro Video bis zu 5 Eintraege {a, e, blob}, neueste zuerst */
+function shSegList() { return shSegs[activeVideoId] || []; }
+function shSegFind(a, e) { return a == null || e == null ? null : shSegList().find(x => Math.abs(x.a - a) <= 0.05 && Math.abs(x.e - e) <= 0.05) || null; }
+function shSegSave(vid, a, e, blob) {
+  const list = shSegs[vid] || (shSegs[vid] = []);
+  const i = list.findIndex(x => Math.abs(x.a - a) <= 0.05 && Math.abs(x.e - e) <= 0.05);
+  if (i >= 0) list.splice(i, 1);                               // gleicher Abschnitt: Aufnahme ersetzen, nach vorn
+  list.unshift({ a, e, blob });
+  while (list.length > 5) list.pop().blob = null;              // herausgefallene Aufnahmen loslassen
+}
+function shRenderSegs() {
+  const list = shSegList(), box = document.getElementById('shSegs'), chips = document.getElementById('shSegChips');
+  box.classList.toggle('on', list.length > 0);
+  chips.innerHTML = '';
+  list.forEach((x, i) => {
+    const b = document.createElement('button');
+    b.className = 'sh-segchip' + (shRt.a != null && shRt.b != null && Math.abs(x.a - shRt.a) <= 0.05 && Math.abs(x.e - shRt.b) <= 0.05 ? ' cur' : '');
+    b.textContent = fmtPos(x.a) + ' – ' + fmtPos(x.e);
+    b.disabled = shRt.hold;
+    b.onclick = () => shSegLoad(i);
+    chips.appendChild(b);
+  });
+}
+function shSegLoad(i) {                                        // Chip: Marker setzen, zu Anfang springen, pausiert bleiben
+  const x = shSegList()[i];
+  if (!x || shRt.hold || !shReady()) return;
+  shCancelCompare(false);
+  clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
+  shRt.a = x.a; shRt.b = x.e; shRt.reps = 0; shRt.fine = 'e'; shRt.loop = true;
+  try { ytPlayer.pauseVideo(); } catch {}
+  shSliderSeek(x.a, true);
+  shRt.pos = x.a; document.getElementById('shSlider').value = x.a; shRenderReadout(x.a);
+  shRender();
 }
 async function shMicGet() {
   if (shRt.mic && shRt.mic.getAudioTracks().some(t => t.readyState === 'live')) return shRt.mic;
@@ -1983,6 +2075,7 @@ function shMicStop() {
 function shRecToggle() { shRt.recording ? shRecStop() : shRecStart(false); }
 async function shRecStart(hold) {
   if (shRt.recording || shRt.micPending || !shReady()) return;
+  if (shRt.a == null || shRt.b == null) { showToast('Zuerst Anfang und Ende setzen.'); return; }
   shCancelCompare(false);
   shRt.recHold = !!hold;
   shHoldOn();                                                   // Pause-Timer weg, Video pausieren, Loop-Takt ruht
@@ -2005,14 +2098,12 @@ async function shRecStart(hold) {
   let mr;
   try { mr = mime ? new MediaRecorder(stream, { mimeType:mime }) : new MediaRecorder(stream); }
   catch { shRt.hold = false; showToast('Aufnahme wird von diesem Browser nicht unterstützt.'); shRenderRec(); return; }
-  const chunks = [], key = shRecKey(), t0 = performance.now();
+  const chunks = [], vid = activeVideoId, ra = shRt.a, rb = shRt.b, t0 = performance.now();
   mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   mr.onstop = () => {
     if (performance.now() - t0 < 400) { showToast('Zu kurz — nicht gespeichert.'); return; }
-    const list = shRecs[key] || (shRecs[key] = []);
-    list.push(new Blob(chunks, { type: mr.mimeType || mime || 'audio/webm' }));
-    while (list.length > 5) list.shift();
-    showToast('Aufnahme gespeichert.'); shRenderRec();
+    shSegSave(vid, ra, rb, new Blob(chunks, { type: mr.mimeType || mime || 'audio/webm' }));
+    showToast('Aufnahme gespeichert.'); shRenderSegs(); shRenderRec();
   };
   shRt.recMr = mr; shRt.recT0 = t0; shRt.recording = true;
   mr.start();
@@ -2024,6 +2115,7 @@ async function shRecStart(hold) {
   shRenderRec();
 }
 function shHoldOn() {
+  shSliderCommit();
   shRt.hold = true;
   clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
   try { const st = ytPlayer.getPlayerState(); if (st === 1 || st === 3) ytPlayer.pauseVideo(); } catch {}
@@ -2041,6 +2133,8 @@ function shRenderCtl() {                                           // gesperrt, 
   document.getElementById('shAgainBtn').disabled = lock || shRt.a == null;
   document.getElementById('shNextBtn').disabled = lock || shRt.a == null || shRt.b == null;
   document.getElementById('shCmpBtn').disabled = lock;
+  document.getElementById('shSlider').disabled = lock;
+  document.querySelectorAll('.sh-segchip').forEach(b => b.disabled = lock);
 }
 let shPlayShown = null;
 function shRenderPlayIcon(st) {
@@ -2072,9 +2166,9 @@ function shCancelCompare(restoreLoop) {
 function shCompare() {
   if (shRt.cmp) { shCancelCompare(true); try { ytPlayer.pauseVideo(); } catch {} return; }
   if (shRt.recording || shRt.hold || !shReady()) return;
-  const list = shRecs[shRecKey()];
-  if (!list || !list.length) { showToast('Erst aufnehmen, dann vergleichen.'); return; }
   if (shRt.a == null || shRt.b == null) { showToast('Zuerst Anfang und Ende setzen.'); return; }
+  const ent = shSegFind(shRt.a, shRt.b);
+  if (!ent) { showToast('Erst aufnehmen, dann vergleichen.'); return; }
   const c = shRt.cmp = { wasLoop: shRt.loop, poll: null, audio: null };
   clearTimeout(shRt.gapTimer); shRt.gapTimer = null; shRt.inGap = false;
   shRt.loop = false;                                           // Loop ruht waehrend des Vergleichs
@@ -2086,7 +2180,7 @@ function shCompare() {
     if (!((st === 1 && t >= shRt.b - 0.04) || performance.now() - t0 > limit)) return;
     clearInterval(c.poll); c.poll = null;
     try { ytPlayer.pauseVideo(); } catch {}
-    const blob = list[list.length - 1], au = new Audio(URL.createObjectURL(blob));
+    const au = new Audio(URL.createObjectURL(ent.blob));
     c.audio = au;
     au.onended = () => { if (shRt.cmp === c) shCancelCompare(true); };       // danach bleibt alles pausiert
     au.play().catch(() => { showToast('Wiedergabe nicht möglich.'); if (shRt.cmp === c) shCancelCompare(true); });
@@ -3899,6 +3993,12 @@ function jumpToTopic(id) {
 document.addEventListener('keydown', e => {
   const typing = ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);
   if (e.key === 'Escape') { shCloseSheet(); closeTopicModal(); closeVideoModal(); closeDataModal(); closeStationModal(); closeAuthModal(); closeAcctMenu(); hideCtx(); autoplayCancel(); if (typing) e.target.blur(); return; }
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.metaKey && !e.ctrlKey && !e.altKey && sh().on && currentView === 'player' && activeVideoId) {
+    const tg = e.target, tag = tg && tg.tagName;
+    if (!(tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && tg.type !== 'range'))) {    // auch wenn der Regler selbst den Fokus hat
+      e.preventDefault(); shStepPos((e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 1 : 0.1)); return;
+    }
+  }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
 
   if (e.key === '/') { e.preventDefault(); setView('player'); document.getElementById('searchInput').focus(); return; }
