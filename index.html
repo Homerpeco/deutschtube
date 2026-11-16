@@ -266,6 +266,8 @@
   .sh-switch.on { background:var(--accent); border-color:var(--accent); }
   .sh-switch.on::after { transform:translateX(18px); background:#fff; }
   .sh-keys { font-size:11.5px; color:var(--text-muted); line-height:2; margin-top:12px; border-top:1px solid var(--border); padding-top:8px; }
+  .sh-del { display:none; margin-top:8px; padding:0; min-height:36px; font:inherit; font-size:12px; font-weight:600; color:var(--text-dim); background:none; border:0; text-decoration:underline; cursor:pointer; text-align:left; }
+  .sh-del.on { display:block; }
   .sh-pos { display:none; }
   .sh-pos.on { display:block; }
   .sh-track { position:relative; height:32px; --thumb:28px; }
@@ -808,6 +810,7 @@
             <div class="sh-keys only-desktop">
               <span class="kbd">U</span> Shadowing aus · <span class="kbd">A</span> Anfang · <span class="kbd">E</span> Ende · <span class="kbd">L</span> Loop · <span class="kbd">G</span> Pause · <span class="kbd">1</span>–<span class="kbd">4</span> Tempo · <span class="kbd">Leertaste</span> Play/Pause · <span class="kbd">←</span> <span class="kbd">→</span> Position ±0,1 s (<span class="kbd">Umschalt</span> ±1 s) · <span class="kbd">M</span> halten = Aufnehmen · <span class="kbd">P</span> Vergleichen
             </div>
+            <button class="sh-del" id="shDelBtn" onclick="shDelAll()">Aufnahmen auf diesem Gerät löschen <span id="shDelN" translate="no"></span></button>
           </div>
           <div class="sh-pos" id="shPos">
             <div class="sh-track" id="shTrack">
@@ -1660,7 +1663,7 @@ const shRt = { a:null, b:null, loop:false, reps:0, inGap:false, gapTimer:null, t
                dur:0, dragging:false, sliderSeekAt:0, sliderTrail:null, pos:-1, fine:'a', sheet:false,
                slDown:false, slWasPlaying:false, slHold:null, stepPos:null, stepAt:0, cmp:null, recording:false, recHold:false, mHeld:false, mic:null, micPending:false,
                recMr:null, recT0:0, recTick:null, hold:false };
-const shSegs = {};          // "Letzte Abschnitte": nur im Arbeitsspeicher, Video-ID -> [{a, e, blob}] (neueste zuerst, max. 5); nie gespeichert
+const shSegs = {};          // "Letzte Abschnitte": YouTube-Video-ID -> [{a, e, blob, mime, at}] (neueste zuerst, max. 5); Kopie auf dem Geraet in IndexedDB (nie localStorage, Export oder Sync)
 
 function sh() {                                   // Einstellungen (in ui, wird mitsynchronisiert)
   const s = (ui.shadow && typeof ui.shadow === 'object') ? ui.shadow : (ui.shadow = {});
@@ -1972,6 +1975,7 @@ function applyShadowUI() {
   shBodyClass();
   shRender();
   shSyncTimer();
+  if (on) shSegHydrate();
 }
 
 /* Anzeige */
@@ -2015,6 +2019,7 @@ function shOpenSheet() {
   shRt.sheet = true;
   document.getElementById('shSheet').classList.add('on');
   const c = document.getElementById('shSetBtn'); c.classList.add('on'); c.setAttribute('aria-expanded', 'true');
+  shRenderStore();
 }
 function shCloseSheet() {
   shRt.sheet = false;
@@ -2027,16 +2032,152 @@ document.addEventListener('click', e => {
   shCloseSheet();
 });
 
-/* ---------- Aufnahme (nur Arbeitsspeicher) ---------- */
-/* Letzte Abschnitte: pro Video bis zu 5 Eintraege {a, e, blob}, neueste zuerst */
-function shSegList() { return shSegs[activeVideoId] || []; }
-function shSegFind(a, e) { return a == null || e == null ? null : shSegList().find(x => Math.abs(x.a - a) <= 0.05 && Math.abs(x.e - e) <= 0.05) || null; }
-function shSegSave(vid, a, e, blob) {
-  const list = shSegs[vid] || (shSegs[vid] = []);
-  const i = list.findIndex(x => Math.abs(x.a - a) <= 0.05 && Math.abs(x.e - e) <= 0.05);
+/* ---------- Aufnahme ---------- */
+/* Letzte Abschnitte: pro YouTube-Video bis zu 5 Eintraege {a, e, blob, mime, at}, neueste zuerst.
+   Arbeitsspeicher (shSegs) plus Kopie auf dem Geraet in IndexedDB "deutschtube_shadow" (Store "segs"). */
+function shYt() { const v = activeVideoId && videos.find(x => x.id === activeVideoId); return v ? v.videoId : null; }
+function shSegList() { return shSegs[shYt()] || []; }
+function shSegSame(x, a, e) { return Math.abs(x.a - a) <= 0.05 && Math.abs(x.e - e) <= 0.05; }
+function shSegFind(a, e) { return a == null || e == null ? null : shSegList().find(x => shSegSame(x, a, e)) || null; }
+function shSegSave(yt, a, e, blob, at) {
+  const list = shSegs[yt] || (shSegs[yt] = []);
+  const i = list.findIndex(x => shSegSame(x, a, e));
   if (i >= 0) list.splice(i, 1);                               // gleicher Abschnitt: Aufnahme ersetzen, nach vorn
-  list.unshift({ a, e, blob });
+  list.unshift({ a, e, blob, mime: blob.type, at });
   while (list.length > 5) list.pop().blob = null;              // herausgefallene Aufnahmen loslassen
+}
+
+/* --- IndexedDB: lazy geoeffnet, jede Operation ueber ein Promise, das auch bei Abbruch ablehnt --- */
+const SH_DB = { p:null, warned:false, persisted:false, hydFor:null, n:0 };
+function shDbOpen() {
+  if (SH_DB.p) return SH_DB.p;
+  const p = SH_DB.p = new Promise((res, rej) => {
+    let settled = false;
+    const fail = e => { if (!settled) { settled = true; rej(e); } };
+    try {
+      const req = indexedDB.open('deutschtube_shadow', 1);
+      req.onupgradeneeded = () => {
+        const st = req.result.createObjectStore('segs', { keyPath:'id' });
+        st.createIndex('videoId', 'videoId');
+        st.createIndex('at', 'at');                            // fuer die globale Obergrenze, ohne die Audiodaten zu laden
+      };
+      req.onblocked = () => fail(new Error('blocked'));
+      req.onerror = () => fail(req.error || new Error('open failed'));
+      req.onsuccess = () => {
+        const db = req.result;
+        if (settled) { db.close(); return; }                   // zu spaet (nach onblocked)
+        settled = true;
+        db.onversionchange = () => { db.close(); if (SH_DB.p === p) SH_DB.p = null; };
+        db.onclose = () => { if (SH_DB.p === p) SH_DB.p = null; };
+        res(db);
+      };
+    } catch (e) { fail(e); }
+  });
+  p.catch(() => { if (SH_DB.p === p) SH_DB.p = null; });       // naechster Versuch darf neu oeffnen
+  return p;
+}
+/* fn(store) startet die Requests und gibt ein Ergebnisobjekt zurueck; aufgeloest wird erst bei "complete" */
+function shDbTx(mode, fn) {
+  return shDbOpen().then(db => new Promise((res, rej) => {
+    let tx, out;
+    try { tx = db.transaction('segs', mode); out = fn(tx.objectStore('segs')); }
+    catch (e) { try { tx && tx.abort(); } catch {} rej(e); return; }
+    tx.oncomplete = () => res(out);
+    tx.onabort = () => rej(tx.error || new Error('aborted'));
+    tx.onerror = () => rej(tx.error || new Error('tx error'));
+  }));
+}
+function shDbFail(err) {                                       // Schreibfehler: Eintrag bleibt im Arbeitsspeicher, nur einmal melden
+  try { console.warn('Shadowing-Speicher:', err); } catch {}
+  if (SH_DB.warned) return;
+  SH_DB.warned = true;
+  showToast('Aufnahme bleibt nur bis zum Neuladen erhalten.');
+}
+function shDbWrite(yt, a, e, buf, mime, at) {
+  const rec = { id: yt + '|' + a.toFixed(2) + '|' + e.toFixed(2), videoId: yt, a, e, buf, mime, at };
+  return shDbTx('readwrite', st => {
+    const rows = [];
+    st.index('videoId').openCursor(IDBKeyRange.only(yt)).onsuccess = ev => {
+      const c = ev.target.result;
+      if (c) { const r = c.value; rows.push({ id:r.id, a:r.a, e:r.e, at:r.at }); c.continue(); return; }
+      const keep = [];
+      rows.forEach(r => { if (shSegSame(r, a, e)) st.delete(r.id); else keep.push(r); });   // ersetzte Aufnahme weg
+      st.put(rec);
+      keep.sort((x, y) => y.at - x.at).slice(4).forEach(r => st.delete(r.id));               // neueste 5 pro Video
+    };
+    return null;
+  }).then(() => {
+    if (!SH_DB.persisted && navigator.storage && navigator.storage.persist) {
+      SH_DB.persisted = true;
+      try { Promise.resolve(navigator.storage.persist()).catch(() => {}); } catch {}
+    }
+    return shDbTrim().catch(() => {});                          // globale Obergrenze: Fehler hier zaehlt nicht als Speicherfehler
+  }).then(shRenderStore);
+}
+function shDbTrim() {                                          // hoechstens 100 Eintraege insgesamt, aelteste zuerst weg
+  return shDbTx('readwrite', st => {
+    st.count().onsuccess = ev => {
+      let extra = ev.target.result - 100;
+      if (extra <= 0) return;
+      st.index('at').openKeyCursor().onsuccess = ev2 => {
+        const c = ev2.target.result;
+        if (!c || extra <= 0) return;
+        st.delete(c.primaryKey); extra--; c.continue();
+      };
+    };
+    return null;
+  });
+}
+function shSegHydrate() {                                      // Eintraege des aktiven Videos vom Geraet holen
+  const yt = shYt();
+  if (!yt || !sh().on || SH_DB.hydFor === yt) return;
+  SH_DB.hydFor = yt;
+  shDbTx('readonly', st => {
+    const out = [];
+    st.index('videoId').openCursor(IDBKeyRange.only(yt)).onsuccess = ev => {
+      const c = ev.target.result; if (c) { out.push(c.value); c.continue(); }
+    };
+    return out;
+  }).then(rows => {
+    const list = shSegs[yt] || (shSegs[yt] = []);
+    rows.sort((x, y) => y.at - x.at).slice(0, 5).forEach(r => {
+      if (list.some(x => shSegSame(x, r.a, r.e))) return;      // Arbeitsspeicher gewinnt bei gleichem A/E
+      list.push({ a:r.a, e:r.e, blob:new Blob([r.buf], { type:r.mime }), mime:r.mime, at:r.at });
+    });
+    list.sort((x, y) => y.at - x.at);
+    while (list.length > 5) list.pop().blob = null;
+    if (shYt() === yt) shRenderSegs();                         // nicht rendern, wenn inzwischen ein anderes Video aktiv ist
+  }).catch(err => { if (SH_DB.hydFor === yt) SH_DB.hydFor = null; try { console.warn('Shadowing-Speicher:', err); } catch {} });
+}
+function shDbDropVideo(yt) {                                   // Video geloescht: Eintraege im Speicher und auf dem Geraet weg
+  if (shSegs[yt]) { shSegs[yt].forEach(x => { x.blob = null; }); delete shSegs[yt]; }
+  if (SH_DB.hydFor === yt) SH_DB.hydFor = null;
+  return shDbTx('readwrite', st => {
+    st.index('videoId').openKeyCursor(IDBKeyRange.only(yt)).onsuccess = ev => {
+      const c = ev.target.result; if (c) { st.delete(c.primaryKey); c.continue(); }
+    };
+    return null;
+  }).then(shRenderStore).catch(err => { try { console.warn('Shadowing-Speicher:', err); } catch {} });
+}
+function shDbClearAll() {
+  for (const k of Object.keys(shSegs)) { shSegs[k].forEach(x => { x.blob = null; }); delete shSegs[k]; }
+  SH_DB.hydFor = null;
+  return shDbTx('readwrite', st => { st.clear(); return null; })
+    .then(shRenderStore).catch(err => { try { console.warn('Shadowing-Speicher:', err); } catch {} });
+}
+function shRenderStore() {                                     // Zeile "Aufnahmen auf diesem Gerät löschen (n)" in den Einstellungen
+  const btn = document.getElementById('shDelBtn'); if (!btn) return Promise.resolve();
+  return shDbTx('readonly', st => { const o = { n:0 }; st.count().onsuccess = ev => { o.n = ev.target.result; }; return o; })
+    .then(o => { SH_DB.n = o.n; }, () => { SH_DB.n = 0; })
+    .then(() => {
+      btn.classList.toggle('on', SH_DB.n > 0);
+      document.getElementById('shDelN').textContent = '(' + SH_DB.n + ')';
+    });
+}
+function shDelAll() {
+  if (!confirm('Alle gespeicherten Aufnahmen auf diesem Gerät löschen?')) return;
+  shDbClearAll().then(() => { shRenderSegs(); showToast('Aufnahmen gelöscht.'); });
+  shRenderSegs();
 }
 function shRenderSegs() {
   const list = shSegList(), box = document.getElementById('shSegs'), chips = document.getElementById('shSegChips');
@@ -2098,12 +2239,14 @@ async function shRecStart(hold) {
   let mr;
   try { mr = mime ? new MediaRecorder(stream, { mimeType:mime }) : new MediaRecorder(stream); }
   catch { shRt.hold = false; showToast('Aufnahme wird von diesem Browser nicht unterstützt.'); shRenderRec(); return; }
-  const chunks = [], vid = activeVideoId, ra = shRt.a, rb = shRt.b, t0 = performance.now();
+  const chunks = [], vid = shYt(), ra = shRt.a, rb = shRt.b, t0 = performance.now();
   mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   mr.onstop = () => {
     if (performance.now() - t0 < 400) { showToast('Zu kurz — nicht gespeichert.'); return; }
-    shSegSave(vid, ra, rb, new Blob(chunks, { type: mr.mimeType || mime || 'audio/webm' }));
+    const blob = new Blob(chunks, { type: mr.mimeType || mime || 'audio/webm' }), at = Date.now();
+    shSegSave(vid, ra, rb, blob, at);                          // sofort im Arbeitsspeicher und in den Chips ...
     showToast('Aufnahme gespeichert.'); shRenderSegs(); shRenderRec();
+    blob.arrayBuffer().then(buf => shDbWrite(vid, ra, rb, buf, blob.type, at)).catch(shDbFail);   // ... dann auf dem Geraet
   };
   shRt.recMr = mr; shRt.recT0 = t0; shRt.recording = true;
   mr.start();
@@ -3253,6 +3396,7 @@ function confirmDeleteVideo(id) {
   const v = videos.find(x => x.id === id); if (!v) return;
   if (!confirm(`„${v.title || 'Video'}“ wirklich löschen?\nDie Statistik dazu geht mit verloren.`)) return;
   tombstone('v:' + v.videoId);
+  shDbDropVideo(v.videoId);
   videos = videos.filter(x => x.id !== id);
   if (activeVideoId === id) {
     activeVideoId = null;
@@ -3329,7 +3473,7 @@ function resetAll() {
   stopRadio();
   const s = blankState();
   topics = s.topics; videos = []; stations = s.stations.map(normaliseStation); dailyC = {}; daily = {}; openTopics = {}; ui = {};
-  activeVideoId = null; shResetLoop(); applyShadowUI();
+  activeVideoId = null; shResetLoop(); shDbClearAll(); applyShadowUI();
   saveData(true); renderSidebar(); renderStations(); updateStats(); closeDataModal();
   showToast('Zurückgesetzt. (Eine Rücksetz-Kopie liegt im Browser.)');
 }
