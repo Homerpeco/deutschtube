@@ -2227,12 +2227,19 @@ function shSegLoad(i) {                                        // Chip: Marker s
 async function shMicGet() {
   if (shRt.mic && shRt.mic.getAudioTracks().some(t => t.readyState === 'live')) return shRt.mic;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { const e = new Error('no mediaDevices'); e.name = 'NoMedia'; throw e; }
-  shRt.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
+  /* Alles aus: das Video ist waehrend der Aufnahme stumm (kein Echo), und eine offene Sprachverarbeitung wuerde den Ton im Tab verschlechtern */
+  shRt.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
   return shRt.mic;
 }
+/* Mikrofon nach jeder Aufnahme freigeben: sonst schaltet das System den Ton des ganzen Tabs in den Sprachmodus */
+function shMicRelease(stream) {
+  const m = stream || shRt.mic; if (!m) return;
+  try { m.getTracks().forEach(t => t.stop()); } catch {}
+  if (shRt.mic === m) shRt.mic = null;
+}
 function shMicStop() {
-  if (shRt.recording) shRecStop();
-  if (shRt.mic) { try { shRt.mic.getTracks().forEach(t => t.stop()); } catch {} shRt.mic = null; }
+  if (shRt.recording) shRecStop();                              // onstop gibt frei, sobald die Daten gesammelt sind
+  else shMicRelease();
 }
 function shRecToggle() { shRt.recording ? shRecStop() : shRecStart(false); }
 async function shRecStart(hold) {
@@ -2246,7 +2253,7 @@ async function shRecStart(hold) {
   let stream;
   try { stream = await shMicGet(); }
   catch (err) {
-    shRt.micPending = false; shRt.hold = false; shRenderRec();
+    shRt.micPending = false; shRt.hold = false; shUnmute(); shRenderRec();
     const n = err && err.name;
     showToast(n === 'NotAllowedError' || n === 'SecurityError' ? 'Mikrofon nicht erlaubt — bitte im Browser freigeben.'
             : n === 'NotFoundError' ? 'Kein Mikrofon gefunden.'
@@ -2256,11 +2263,11 @@ async function shRecStart(hold) {
   }
   shRt.micPending = false;
   if (!sh().on) { shRt.hold = false; shMicStop(); shRenderRec(); return; }
-  if (hold && !shRt.mHeld) { shRt.hold = false; showToast('Mikrofon bereit — jetzt M gedrückt halten.'); shRenderRec(); return; }   // Taste schon losgelassen (Rueckfrage)
+  if (hold && !shRt.mHeld) { shRt.hold = false; shMicRelease(stream); showToast('Mikrofon bereit — jetzt M gedrückt halten.'); shRenderRec(); return; }   // Taste schon losgelassen (Rueckfrage)
   const mime = ['audio/webm;codecs=opus', 'audio/mp4'].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
   let mr;
   try { mr = mime ? new MediaRecorder(stream, { mimeType:mime }) : new MediaRecorder(stream); }
-  catch { shRt.hold = false; showToast('Aufnahme wird von diesem Browser nicht unterstützt.'); shRenderRec(); return; }
+  catch { shRt.hold = false; shMicRelease(stream); shUnmute(); showToast('Aufnahme wird von diesem Browser nicht unterstützt.'); shRenderRec(); return; }
   const chunks = [], vid = shYt(), ra = shRt.a, rb = shRt.b, t0 = performance.now();
   /* Erst wenn der Recorder wirklich laeuft (auch nach einer ersten Mikrofon-Abfrage): Video stumm, zu Anfang, abspielen */
   mr.onstart = () => {
@@ -2273,6 +2280,7 @@ async function shRecStart(hold) {
   mr.onerror = () => { if (shRt.recMr === mr) { shRecStop(); showToast('Aufnahme fehlgeschlagen.'); } };
   mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   mr.onstop = () => {
+    shMicRelease(stream);                                      // Daten sind gesammelt (dataavailable kommt vor stop): Mikrofon frei
     if (performance.now() - t0 < 400) { showToast('Zu kurz — nicht gespeichert.'); return; }
     const blob = new Blob(chunks, { type: mr.mimeType || mime || 'audio/webm' }), at = Date.now();
     shSegSave(vid, ra, rb, blob, at);                          // sofort im Arbeitsspeicher und in den Chips ...
@@ -2282,7 +2290,7 @@ async function shRecStart(hold) {
   shRt.recMr = mr; shRt.recT0 = t0; shRt.recording = true; shRt.recPlay = false; shRt.recEnd = rb;
   shRt.recMax = Math.min(120000, Math.max(30000, ((rb - ra) / Math.max(0.25, shRt.rate) + 10) * 1000));   // max(30 s, Abschnitt / Tempo + 10 s), hoechstens 120 s
   try { mr.start(); }
-  catch { shRt.recording = false; shRt.recMr = null; shRt.hold = false; showToast('Aufnahme konnte nicht gestartet werden.'); shRenderRec(); return; }
+  catch { shRt.recording = false; shRt.recMr = null; shRt.hold = false; shMicRelease(stream); shUnmute(); showToast('Aufnahme konnte nicht gestartet werden.'); shRenderRec(); return; }
   clearInterval(shRt.recTick);
   shRt.recTick = setInterval(() => {
     if (performance.now() - shRt.recT0 >= shRt.recMax) { shRecStop(); showToast('Aufnahme beendet (' + Math.round(shRt.recMax / 1000) + ' s).'); }
@@ -2299,7 +2307,9 @@ function shHoldOn() {
 function shRecStop() {
   if (!shRt.recording) return;
   shRt.recording = false; shRt.recPlay = false; shRt.hold = false; clearInterval(shRt.recTick); shRt.recTick = null;
-  try { shRt.recMr.stop(); } catch {}
+  const m = shRt.mic;
+  try { shRt.recMr.stop(); } catch { shMicRelease(m); }         // Recorder schon inaktiv (Fehler): onstop kommt nicht mehr
+  setTimeout(() => { if (m && shRt.mic === m) shMicRelease(m); }, 3000);   // Netz: Mikrofon nie offen lassen, falls onstop ausbleibt
   try { ytPlayer.pauseVideo(); } catch {}                       // danach bleibt das Video pausiert ...
   shUnmute();                                                   // ... und der Ton ist zurueck (nur wenn die Aufnahme ihn abgeschaltet hat)
   shRenderRec();
